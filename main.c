@@ -455,6 +455,10 @@ error:
     return status;
 }
 
+static void encoder_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * buffer) {
+    mmal_buffer_header_release(buffer);
+}
+
 
 int main(int ac, char ** av) {
     MMAL_STATUS_T status = MMAL_SUCCESS;
@@ -497,11 +501,24 @@ int main(int ac, char ** av) {
         goto cleanup;
     }
 
+    encoder_output_port->userdata = (struct MMAL_PORT_USERDATA_T*)&state;
+
+    if ((status = mmal_port_enable(encoder_output_port, encoder_buffer_callback)) != MMAL_SUCCESS) {
+        fprintf(stderr, "error enabling encoder output port");
+        goto cleanup;
+    }
     
 
 cleanup:
 
     mmal_status_to_int(status);
+
+    if (state.encoder_connection != NULL) {
+        if (state.encoder_connection->is_enabled) {
+            mmal_connection_disable(state.encoder_connection);
+        }
+        mmal_connection_destroy(state.encoder_connection);
+    }
 
     if (camera_video_port != NULL && camera_video_port->is_enabled) {
         mmal_port_disable(camera_video_port);
