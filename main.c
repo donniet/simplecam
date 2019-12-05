@@ -30,14 +30,17 @@
 #define DEFAULT_ENCODING_PROFILE MMAL_VIDEO_PROFILE_H264_HIGH
 #define DEFAULT_ENCODING_LEVEL MMAL_VIDEO_LEVEL_H264_42
 
+#define DEFAULT_SENSOR_MODE 0
+
 const int camera_num = 0;
 
 typedef struct {
-    uint32_t width;
-    uint32_t height;
+    char camera_name[MMAL_PARAMETER_CAMERA_INFO_MAX_STR_LEN];
+    int width;
+    int height;
     uint32_t framerate;
     uint32_t bitrate;
-    uint32_t cameraNum;
+    int cameraNum;
     MMAL_COMPONENT_T * camera;
     MMAL_COMPONENT_T * encoder;
     MMAL_CONNECTION_T * encoder_connection;
@@ -45,6 +48,7 @@ typedef struct {
     MMAL_FOURCC_T encoding;
     int profile;
     int level;
+    int sensor_mode;
 } state_t;
 
 void initialize_state(state_t * state) {
@@ -59,6 +63,7 @@ void initialize_state(state_t * state) {
     state->encoding = DEFAULT_ENCODING;
     state->profile = DEFAULT_ENCODING_PROFILE;
     state->level = DEFAULT_ENCODING_LEVEL;
+    state->sensor_mode = DEFAULT_SENSOR_MODE;
 }
 
 
@@ -133,7 +138,7 @@ int mmal_status_to_int(MMAL_STATUS_T status)
 
 void default_camera_control_callback(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buffer)
 {
-   fprintf(stderr, "Camera control callback  cmd=0x%08x", buffer->cmd);
+   fprintf(stderr, "Camera control callback  cmd=0x%08x\n", buffer->cmd);
 
    if (buffer->cmd == MMAL_EVENT_PARAMETER_CHANGED)
    {
@@ -143,11 +148,11 @@ void default_camera_control_callback(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *bu
       case MMAL_PARAMETER_CAMERA_SETTINGS:
       {
          MMAL_PARAMETER_CAMERA_SETTINGS_T *settings = (MMAL_PARAMETER_CAMERA_SETTINGS_T*)param;
-         fprintf(stderr, "Exposure now %u, analog gain %u/%u, digital gain %u/%u",
+         fprintf(stderr, "Exposure now %u, analog gain %u/%u, digital gain %u/%u\n",
                         settings->exposure,
                         settings->analog_gain.num, settings->analog_gain.den,
                         settings->digital_gain.num, settings->digital_gain.den);
-         fprintf(stderr, "AWB R=%u/%u, B=%u/%u",
+         fprintf(stderr, "AWB R=%u/%u, B=%u/%u\n",
                         settings->awb_red_gain.num, settings->awb_red_gain.den,
                         settings->awb_blue_gain.num, settings->awb_blue_gain.den);
       }
@@ -156,11 +161,11 @@ void default_camera_control_callback(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *bu
    }
    else if (buffer->cmd == MMAL_EVENT_ERROR)
    {
-      fprintf(stderr, "No data received from sensor. Check all connections, including the Sunny one on the camera board");
+      fprintf(stderr, "No data received from sensor. Check all connections, including the Sunny one on the camera board\n");
    }
    else
    {
-      fprintf(stderr, "Received unexpected camera control callback event, 0x%08x", buffer->cmd);
+      fprintf(stderr, "Received unexpected camera control callback event, 0x%08x\n", buffer->cmd);
    }
 
    mmal_buffer_header_release(buffer);
@@ -176,12 +181,12 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
     status = mmal_component_create(MMAL_COMPONENT_DEFAULT_CAMERA, &camera);
 
     if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "Failed to create camera component");
+        fprintf(stderr, "Failed to create camera component\n");
         goto error;
     }
 
     if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "Could not set stereo mode : error %d", status);
+        fprintf(stderr, "Could not set stereo mode : error %d\n", status);
         goto error;
     }
 
@@ -190,15 +195,21 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
     status = mmal_port_parameter_set(camera->control, &camera_num.hdr);
 
     if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "Could not select camera : error %d", status);
+        fprintf(stderr, "Could not select camera : error %d\n", status);
         goto error;
     }
 
     if (!camera->output_num) {
         status = MMAL_ENOSYS;
-        fprintf(stderr, "Camera doesn't have output ports");
+        fprintf(stderr, "Camera doesn't have output ports\n");
         goto error;
     }
+
+    if ((status = mmal_port_parameter_set_uint32(camera->control, MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG, state->sensor_mode)) != MMAL_SUCCESS) {
+        fprintf(stderr, "Could not set sensor mode\n");
+        goto error;
+    }
+
 
     preview_port = camera->output[MMAL_CAMERA_PREVIEW_PORT];
     video_port = camera->output[MMAL_CAMERA_VIDEO_PORT];
@@ -208,7 +219,7 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
     status = mmal_port_enable(camera->control, default_camera_control_callback);
 
     if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "Unable to enable control port : error %d", status);
+        fprintf(stderr, "Unable to enable control port : error %d\n", status);
         goto error;
     }
 
@@ -249,10 +260,12 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
     format->es->video.frame_rate.num = state->framerate;
     format->es->video.frame_rate.den = 1;
 
+    mmal_log_dump_format(format);
+
     status = mmal_port_format_commit(preview_port);
 
     if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "camera viewfinder format couldn't be set");
+        fprintf(stderr, "camera viewfinder format couldn't be set\n");
         goto error;
     }
 
@@ -273,7 +286,7 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
     status = mmal_port_format_commit(video_port);
 
     if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "camera video format couldn't be set");
+        fprintf(stderr, "camera video format couldn't be set\n");
         goto error;
     }
 
@@ -301,7 +314,7 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
     status = mmal_port_format_commit(still_port);
 
     if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "camera still format couldn't be set");
+        fprintf(stderr, "camera still format couldn't be set\n");
         goto error;
     }
 
@@ -313,7 +326,7 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
     status = mmal_component_enable(camera);
 
     if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "camera component couldn't be enabled");
+        fprintf(stderr, "camera component couldn't be enabled\n");
         goto error;
     }
 
@@ -342,14 +355,14 @@ MMAL_STATUS_T create_encoder_component(state_t * state) {
 
     if (status != MMAL_SUCCESS)
     {
-        fprintf(stderr, "Unable to create video encoder component");
+        fprintf(stderr, "Unable to create video encoder component\n");
         goto error;
     }
 
     if (!encoder->input_num || !encoder->output_num)
     {
         status = MMAL_ENOSYS;
-        fprintf(stderr, "Video encoder doesn't have input/output ports");
+        fprintf(stderr, "Video encoder doesn't have input/output ports\n");
         goto error;
     }
 
@@ -381,7 +394,7 @@ MMAL_STATUS_T create_encoder_component(state_t * state) {
     status = mmal_port_format_commit(encoder_output);
 
     if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "Unable to set format on video encoder output port");
+        fprintf(stderr, "Unable to set format on video encoder output port\n");
         goto error;
     }
 
@@ -394,34 +407,34 @@ MMAL_STATUS_T create_encoder_component(state_t * state) {
 
     status = mmal_port_parameter_set(encoder_output, &param.hdr);
     if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "Unable to set H264 profile");
+        fprintf(stderr, "Unable to set H264 profile\n");
         goto error;
     }
 
     if (mmal_port_parameter_set_boolean(encoder_input, MMAL_PARAMETER_VIDEO_IMMUTABLE_INPUT, MMAL_TRUE) != MMAL_SUCCESS)
     {
-        fprintf(stderr, "Unable to set immutable input flag");
+        fprintf(stderr, "Unable to set immutable input flag\n");
         // Continue rather than abort..
     }
 
     //set INLINE HEADER flag to generate SPS and PPS for every IDR if requested
     if (mmal_port_parameter_set_boolean(encoder_output, MMAL_PARAMETER_VIDEO_ENCODE_INLINE_HEADER, MMAL_TRUE) != MMAL_SUCCESS)
     {
-        fprintf(stderr, "failed to set INLINE HEADER FLAG parameters");
+        fprintf(stderr, "failed to set INLINE HEADER FLAG parameters\n");
         // Continue rather than abort..
     }
 
     //set flag for add SPS TIMING
     if (mmal_port_parameter_set_boolean(encoder_output, MMAL_PARAMETER_VIDEO_ENCODE_SPS_TIMING, MMAL_TRUE) != MMAL_SUCCESS)
     {
-        fprintf(stderr, "failed to set SPS TIMINGS FLAG parameters");
+        fprintf(stderr, "failed to set SPS TIMINGS FLAG parameters\n");
         // Continue rather than abort..
     }
 
     //set INLINE VECTORS flag to request motion vector estimates
     if (mmal_port_parameter_set_boolean(encoder_output, MMAL_PARAMETER_VIDEO_ENCODE_INLINE_VECTORS, MMAL_TRUE) != MMAL_SUCCESS)
     {
-        fprintf(stderr, "failed to set INLINE VECTORS parameters");
+        fprintf(stderr, "failed to set INLINE VECTORS parameters\n");
         // Continue rather than abort..
     }
 
@@ -430,7 +443,7 @@ MMAL_STATUS_T create_encoder_component(state_t * state) {
 
     if (status != MMAL_SUCCESS)
     {
-        fprintf(stderr, "Unable to enable video encoder component");
+        fprintf(stderr, "Unable to enable video encoder component\n");
         goto error;
     }
 
@@ -438,7 +451,7 @@ MMAL_STATUS_T create_encoder_component(state_t * state) {
     pool = mmal_port_pool_create(encoder_output, encoder_output->buffer_num, encoder_output->buffer_size);
 
     if (!pool) {
-        fprintf(stderr, "Failed to create buffer header pool for encoder output port %s", encoder_output->name);
+        fprintf(stderr, "Failed to create buffer header pool for encoder output port %s\n", encoder_output->name);
     }
 
     state->encoder_pool = pool;
@@ -460,6 +473,110 @@ static void encoder_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * b
 }
 
 
+void get_sensor_defaults(int camera_num, char *camera_name, int *width, int *height )
+{
+   MMAL_COMPONENT_T *camera_info;
+   MMAL_STATUS_T status;
+
+   // Default to the OV5647 setup
+   strncpy(camera_name, "OV5647", MMAL_PARAMETER_CAMERA_INFO_MAX_STR_LEN);
+
+   // Try to get the camera name and maximum supported resolution
+   status = mmal_component_create(MMAL_COMPONENT_DEFAULT_CAMERA_INFO, &camera_info);
+   if (status == MMAL_SUCCESS)
+   {
+      MMAL_PARAMETER_CAMERA_INFO_T param;
+      param.hdr.id = MMAL_PARAMETER_CAMERA_INFO;
+      param.hdr.size = sizeof(param)-4;  // Deliberately undersize to check firmware version
+      status = mmal_port_parameter_get(camera_info->control, &param.hdr);
+
+      if (status != MMAL_SUCCESS)
+      {
+         // Running on newer firmware
+         param.hdr.size = sizeof(param);
+         status = mmal_port_parameter_get(camera_info->control, &param.hdr);
+         if (status == MMAL_SUCCESS && param.num_cameras > camera_num)
+         {
+            // Take the parameters from the first camera listed.
+            if (*width == 0)
+               *width = param.cameras[camera_num].max_width;
+            if (*height == 0)
+               *height = param.cameras[camera_num].max_height;
+            strncpy(camera_name, param.cameras[camera_num].camera_name, MMAL_PARAMETER_CAMERA_INFO_MAX_STR_LEN);
+            camera_name[MMAL_PARAMETER_CAMERA_INFO_MAX_STR_LEN-1] = 0;
+         }
+         else
+            fprintf(stderr, "Cannot read camera info, keeping the defaults for OV5647\n");
+      }
+      else
+      {
+         // Older firmware
+         // Nothing to do here, keep the defaults for OV5647
+      }
+
+      mmal_component_destroy(camera_info);
+   }
+   else
+   {
+      fprintf(stderr, "Failed to create camera_info component\n");
+   }
+
+   // default to OV5647 if nothing detected..
+   if (*width == 0)
+      *width = 2592;
+   if (*height == 0)
+      *height = 1944;
+}
+
+int raspicamcontrol_set_stereo_mode(MMAL_PORT_T *port, MMAL_PARAMETER_STEREOSCOPIC_MODE_T *stereo_mode)
+{
+   MMAL_PARAMETER_STEREOSCOPIC_MODE_T stereo = { {MMAL_PARAMETER_STEREOSCOPIC_MODE, sizeof(stereo)},
+      MMAL_STEREOSCOPIC_MODE_NONE, MMAL_FALSE, MMAL_FALSE
+   };
+   if (stereo_mode->mode != MMAL_STEREOSCOPIC_MODE_NONE)
+   {
+      stereo.mode = stereo_mode->mode;
+      stereo.decimate = stereo_mode->decimate;
+      stereo.swap_eyes = stereo_mode->swap_eyes;
+   }
+   return mmal_status_to_int(mmal_port_parameter_set(port, &stereo.hdr));
+}
+
+static void check_camera_model(int cam_num)
+{
+   MMAL_COMPONENT_T *camera_info;
+   MMAL_STATUS_T status;
+
+   // Try to get the camera name
+   status = mmal_component_create(MMAL_COMPONENT_DEFAULT_CAMERA_INFO, &camera_info);
+   if (status == MMAL_SUCCESS)
+   {
+      MMAL_PARAMETER_CAMERA_INFO_T param;
+      param.hdr.id = MMAL_PARAMETER_CAMERA_INFO;
+      param.hdr.size = sizeof(param)-4;  // Deliberately undersize to check firmware version
+      status = mmal_port_parameter_get(camera_info->control, &param.hdr);
+
+      if (status != MMAL_SUCCESS)
+      {
+         // Running on newer firmware
+         param.hdr.size = sizeof(param);
+         status = mmal_port_parameter_get(camera_info->control, &param.hdr);
+         if (status == MMAL_SUCCESS && param.num_cameras > cam_num)
+         {
+            if (!strncmp(param.cameras[cam_num].camera_name, "toshh2c", 7))
+            {
+               fprintf(stderr, "The driver for the TC358743 HDMI to CSI2 chip you are using is NOT supported.\n");
+               fprintf(stderr, "They were written for a demo purposes only, and are in the firmware on an as-is\n");
+               fprintf(stderr, "basis and therefore requests for support or changes will not be acted on.\n\n");
+            }
+         }
+      }
+
+      mmal_component_destroy(camera_info);
+   }
+}
+
+
 int main(int ac, char ** av) {
     MMAL_STATUS_T status = MMAL_SUCCESS;
     state_t state;
@@ -474,13 +591,17 @@ int main(int ac, char ** av) {
 
     bcm_host_init();
 
+    get_sensor_defaults(state.cameraNum, state.camera_name, &state.width, &state.height);
+
+    check_camera_model(state.cameraNum);
+
     if ((status = create_camera_component(&state)) != MMAL_SUCCESS) {
-        fprintf(stderr, "failed to create camera component"); 
+        fprintf(stderr, "failed to create camera component\n"); 
         goto cleanup;
     }
 
     if ((status = create_encoder_component(&state)) != MMAL_SUCCESS) {
-        fprintf(stderr, "could not create encoder component");
+        fprintf(stderr, "could not create encoder component\n");
         goto cleanup;
     }
 
@@ -492,19 +613,19 @@ int main(int ac, char ** av) {
     if ((status = mmal_connection_create(&state.encoder_connection, camera_video_port, encoder_input_port,  
         MMAL_CONNECTION_FLAG_TUNNELLING | MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT)) != MMAL_SUCCESS) 
     {
-        fprintf(stderr, "error creating camera to encoder connections");
+        fprintf(stderr, "error creating camera to encoder connections\n");
         goto cleanup;
     }
 
     if ((status = mmal_connection_enable(state.encoder_connection)) != MMAL_SUCCESS) {
-        fprintf(stderr, "could not enable connection");
+        fprintf(stderr, "could not enable connection\n");
         goto cleanup;
     }
 
     encoder_output_port->userdata = (struct MMAL_PORT_USERDATA_T*)&state;
 
     if ((status = mmal_port_enable(encoder_output_port, encoder_buffer_callback)) != MMAL_SUCCESS) {
-        fprintf(stderr, "error enabling encoder output port");
+        fprintf(stderr, "error enabling encoder output port\n");
         goto cleanup;
     }
     
