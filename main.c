@@ -22,8 +22,8 @@
 #define VIDEO_OUTPUT_BUFFERS_NUM 3
 
 #define DEFAULT_FRAMERATE 25
-#define DEFAULT_WIDTH 1440
-#define DEFAULT_HEIGHT 1080
+#define DEFAULT_WIDTH 0
+#define DEFAULT_HEIGHT 0
 #define DEFAULT_CAMERA_NUM 0
 
 #define DEFAULT_ENCODING MMAL_ENCODING_H264
@@ -33,6 +33,12 @@
 #define DEFAULT_SENSOR_MODE 0
 
 const int camera_num = 0;
+
+int interrupted = 0;
+
+void handle_interrupt(int signal) {
+    interrupted = 1;
+}
 
 typedef struct {
     char camera_name[MMAL_PARAMETER_CAMERA_INFO_MAX_STR_LEN];
@@ -49,6 +55,9 @@ typedef struct {
     int profile;
     int level;
     int sensor_mode;
+    int abort;
+
+    FILE * video_file;
 } state_t;
 
 void initialize_state(state_t * state) {
@@ -64,6 +73,8 @@ void initialize_state(state_t * state) {
     state->profile = DEFAULT_ENCODING_PROFILE;
     state->level = DEFAULT_ENCODING_LEVEL;
     state->sensor_mode = DEFAULT_SENSOR_MODE;
+    state->abort = 0;
+    state->video_file = NULL;
 }
 
 
@@ -171,6 +182,7 @@ void default_camera_control_callback(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *bu
    mmal_buffer_header_release(buffer);
 }
 
+
 MMAL_STATUS_T create_camera_component(state_t * state) {
     MMAL_COMPONENT_T *camera = 0;
     MMAL_ES_FORMAT_T *format;
@@ -185,10 +197,16 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
         goto error;
     }
 
-    if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "Could not set stereo mode : error %d\n", status);
-        goto error;
-    }
+    // MMAL_PARAMETER_STEREOSCOPIC_MODE_T stereo_mode = { { MMAL_STEREOSCOPIC_MODE_NONE }, MMAL_FALSE, MMAL_FALSE };
+
+    // status = raspicamcontrol_set_stereo_mode(camera->output[0], &stereo_mode);
+    // status += raspicamcontrol_set_stereo_mode(camera->output[1], &stereo_mode);
+    // status += raspicamcontrol_set_stereo_mode(camera->output[2], &stereo_mode);
+
+    // if (status != MMAL_SUCCESS) {
+    //     fprintf(stderr, "Could not set stereo mode : error %d\n", status);
+    //     goto error;
+    // }
 
     MMAL_PARAMETER_INT32_T camera_num = {{MMAL_PARAMETER_CAMERA_NUM, sizeof(camera_num)}, state->cameraNum};
 
@@ -205,10 +223,10 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
         goto error;
     }
 
-    if ((status = mmal_port_parameter_set_uint32(camera->control, MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG, state->sensor_mode)) != MMAL_SUCCESS) {
-        fprintf(stderr, "Could not set sensor mode\n");
-        goto error;
-    }
+    // if ((status = mmal_port_parameter_set_uint32(camera->control, MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG, state->sensor_mode)) != MMAL_SUCCESS) {
+    //     fprintf(stderr, "Could not set sensor mode\n");
+    //     goto error;
+    // }
 
 
     preview_port = camera->output[MMAL_CAMERA_PREVIEW_PORT];
@@ -223,24 +241,28 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
         goto error;
     }
 
-    {
-    //  set up the camera configuration {
-        MMAL_PARAMETER_CAMERA_CONFIG_T cam_config =
-        {
-            { MMAL_PARAMETER_CAMERA_CONFIG, sizeof(cam_config) },
-            .max_stills_w = state->width,
-            .max_stills_h = state->height,
-            .stills_yuv422 = 0,
-            .one_shot_stills = 0,
-            .max_preview_video_w = state->width,
-            .max_preview_video_h = state->height,
-            .num_preview_video_frames = 3 + vcos_max(0, (state->framerate-30)/10),
-            .stills_capture_circular_buffer_height = 0,
-            .fast_preview_resume = 0,
-            .use_stc_timestamp = MMAL_PARAM_TIMESTAMP_MODE_RAW_STC
-        };
-        mmal_port_parameter_set(camera->control, &cam_config.hdr);
-    }
+    fprintf(stderr, "size: %dx%d - %d\n", state->width, state->height, state->framerate);
+
+    // i don't know why but this makes us get an error:
+    //    rtos_pool_aligned_malloc: Out of heap from allocating 1717988464 bytes 0x4 align (call from 0x3ee6fa06)  
+    // {
+    // //  set up the camera configuration {
+    //     MMAL_PARAMETER_CAMERA_CONFIG_T cam_config =
+    //     {
+    //         { MMAL_PARAMETER_CAMERA_CONFIG, sizeof(cam_config) },
+    //         .max_stills_w = state->width,
+    //         .max_stills_h = state->height,
+    //         .stills_yuv422 = 0,
+    //         .one_shot_stills = 0,
+    //         .max_preview_video_w = state->width,
+    //         .max_preview_video_h = state->height,
+    //         .num_preview_video_frames = 3 + vcos_max(0, (state->framerate-30)/10),
+    //         .stills_capture_circular_buffer_height = 0,
+    //         .fast_preview_resume = 0,
+    //         .use_stc_timestamp = MMAL_PARAM_TIMESTAMP_MODE_RAW_STC
+    //     };
+    //     mmal_port_parameter_set(camera->control, &cam_config.hdr);
+    // }
 
     // Now set up the port formats
 
@@ -468,11 +490,6 @@ error:
     return status;
 }
 
-static void encoder_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * buffer) {
-    mmal_buffer_header_release(buffer);
-}
-
-
 void get_sensor_defaults(int camera_num, char *camera_name, int *width, int *height )
 {
    MMAL_COMPONENT_T *camera_info;
@@ -492,11 +509,13 @@ void get_sensor_defaults(int camera_num, char *camera_name, int *width, int *hei
 
       if (status != MMAL_SUCCESS)
       {
+         fprintf(stderr, "running newer firmware\n");
          // Running on newer firmware
          param.hdr.size = sizeof(param);
          status = mmal_port_parameter_get(camera_info->control, &param.hdr);
          if (status == MMAL_SUCCESS && param.num_cameras > camera_num)
          {
+            fprintf(stderr, "successfully got camera info: %dx%d\n", param.cameras[camera_num].max_width, param.cameras[camera_num].max_height);
             // Take the parameters from the first camera listed.
             if (*width == 0)
                *width = param.cameras[camera_num].max_width;
@@ -576,6 +595,46 @@ static void check_camera_model(int cam_num)
    }
 }
 
+static void encoder_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * buffer) {
+    MMAL_BUFFER_HEADER_T * new_buffer;
+    size_t bytes_written = 0;
+
+    state_t * state = (state_t*)port->userdata;
+
+    if (buffer->length > 0) {
+        mmal_buffer_header_mem_lock(buffer);
+
+        if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_CODECSIDEINFO) {
+            // motion vectors
+            // do nothing for now
+        } else if (state->video_file != NULL) {
+            // video data
+            bytes_written = fwrite(buffer->data, 1, buffer->length, state->video_file);
+
+        }
+
+        mmal_buffer_header_mem_unlock(buffer);
+    }
+
+    if (bytes_written != buffer->length) {
+        // some sort of problem, abort
+        state->abort = 1;
+    }
+
+    mmal_buffer_header_release(buffer);
+
+    if (port->is_enabled) {
+        MMAL_STATUS_T status;
+        new_buffer = mmal_queue_get(state->encoder_pool->queue);
+
+        if (new_buffer != NULL)
+            status = mmal_port_send_buffer(port, new_buffer);
+        
+        if (new_buffer == NULL || status != MMAL_SUCCESS)
+            fprintf(stderr, "unable to return buffer to the encoder port\n");
+    }
+}
+
 
 int main(int ac, char ** av) {
     MMAL_STATUS_T status = MMAL_SUCCESS;
@@ -589,9 +648,19 @@ int main(int ac, char ** av) {
     MMAL_PORT_T * encoder_input_port = NULL;
     MMAL_PORT_T * encoder_output_port = NULL;
 
+    if (ac > 1) {
+        if ((state.video_file = fopen(av[1], "wb+")) == NULL) {
+            perror(av[1]);
+            exit(-1);
+        }
+    }
+
     bcm_host_init();
+    vcos_log_register("SimpleCam", VCOS_LOG_CATEGORY);
 
     get_sensor_defaults(state.cameraNum, state.camera_name, &state.width, &state.height);
+
+    fprintf(stderr, "sensor defaults: %s -- %dx%d\n", state.camera_name, state.width, state.height);
 
     check_camera_model(state.cameraNum);
 
@@ -628,6 +697,14 @@ int main(int ac, char ** av) {
         fprintf(stderr, "error enabling encoder output port\n");
         goto cleanup;
     }
+
+    signal(SIGINT, handle_interrupt);
+
+    // TODO: temporary, instead use condition variables
+    while(!state.abort && !interrupted)        
+        vcos_sleep(100);
+
+    signal(SIGINT, SIG_DFL);
     
 
 cleanup:
@@ -655,6 +732,10 @@ cleanup:
     }
     if (state.encoder != NULL) {
         mmal_component_destroy(state.encoder);
+    }
+
+    if (state.video_file != NULL) {
+        fclose(state.video_file);
     }
 
     return exit_code;

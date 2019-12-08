@@ -1,0 +1,100 @@
+855222.734: mmal: mmal_component_create: camera_info
+855222.824: mmal: mmal_port_alloc: component:camera_info type:1 extra:0
+855222.926: mmal: mmal_port_alloc: camera_info:ctr:0: created at 3f71b0e0
+855223.020: mmal: mmal_pool_create_with_allocator: allocating 48 + 24 + 472 * 4 bytes for pool
+855223.127: mmal: mmal_pool_initialise_buffer_headers: allocating 96 bytes for payload 0/4
+855223.215: mmal: mmal_pool_initialise_buffer_headers: allocating 96 bytes for payload 1/4
+855223.302: mmal: mmal_pool_initialise_buffer_headers: allocating 96 bytes for payload 2/4
+855223.393: mmal: mmal_pool_initialise_buffer_headers: allocating 96 bytes for payload 3/4
+855223.488: mmal: mmal_component_create_core: created 'camera_info' 101 3f71aea0
+855230.074: mmal: mmal_port_parameter_get: camera_info(1:0) port 3f71b0e0, param 3f6ea414 (1001c,148)
+855231.372: mmal: mmal_port_parameter_get: camera_info(1:0) port 3f71b0e0, param 3f6ea414 (1001c,152)
+855233.760: mmal: mmal_component_destroy: camera_info 101
+855233.832: mmal: mmal_component_release_internal: camera_info 101 preparing for destruction
+855233.892: mmal: mmal_component_destroy_internal: camera_info 101
+855233.987: mmal: mmal_port_free: camera_info:ctr:0 at 3f71b0e0
+855237.067: mmal: mmal_component_create: camera_info
+855237.151: mmal: mmal_port_alloc: component:camera_info type:1 extra:0
+855237.251: mmal: mmal_port_alloc: camera_info:ctr:0: created at 3f71b0e0
+855237.339: mmal: mmal_pool_create_with_allocator: allocating 48 + 24 + 472 * 4 bytes for pool
+855237.446: mmal: mmal_pool_initialise_buffer_headers: allocating 96 bytes for payload 0/4
+855237.533: mmal: mmal_pool_initialise_buffer_headers: allocating 96 bytes for payload 1/4
+855237.619: mmal: mmal_pool_initialise_buffer_headers: allocating 96 bytes for payload 2/4
+855237.744: mmal: mmal_pool_initialise_buffer_headers: allocating 96 bytes for payload 3/4
+855237.838: mmal: mmal_component_create_core: created 'camera_info' 102 3f71aea0
+855245.035: mmal: mmal_port_parameter_get: camera_info(1:0) port 3f71b0e0, param 3f6ea414 (1001c,148)
+855246.256: mmal: mmal_port_parameter_get: camera_info(1:0) port 3f71b0e0, param 3f6ea414 (1001c,152)
+855247.906: mmal: mmal_component_destroy: camera_info 102
+855247.977: mmal: mmal_component_release_internal: camera_info 102 preparing for destruction
+855248.041: mmal: mmal_component_destroy_internal: camera_info 102
+855248.138: mmal: mmal_port_free: camera_info:ctr:0 at 3f71b0e0
+855251.721: mmal: mmal_component_create: ril.camera
+855251.806: mmal: mmal_port_alloc: component:ril.camera type:1 extra:0
+855251.900: mmal: mmal_port_alloc: ril.camera:ctr:0: created at 3f6f7ca0
+855252.713: mmal: mmal_port_alloc: component:ril.camera type:3 extra:3624
+855252.842: mmal: mmal_port_alloc: ril.camera:out:0: created at 3f71f4e0
+855252.929: mmal: mmal_port_alloc: component:ril.camera type:3 extra:3624
+855253.045: mmal: mmal_port_alloc: ril.camera:out:0: created at 3f7204e0
+855253.129: mmal: mmal_port_alloc: component:ril.camera type:3 extra:3624
+855253.241: mmal: mmal_port_alloc: ril.camera:out:0: created at 3f7214e0
+855253.340: mmal: mmal_port_alloc: component:ril.camera type:4 extra:20
+855253.443: mmal: mmal_port_alloc: ril.camera:clk:0: created at 3f722520
+855253.536: mmal: mmal_clock_scale_set: new scale 1/1
+855253.722: mmal: mmal_pool_create_with_allocator: allocating 48 + 24 + 472 * 4 bytes for pool
+855253.828: mmal: mmal_pool_initialise_buffer_headers: allocating 740 bytes for payload 0/4
+855253.915: mmal: mmal_pool_initialise_buffer_headers: allocating 740 bytes for payload 1/4
+855253.993: mmal: mmal_pool_initialise_buffer_headers: allocating 740 bytes for payload 2/4
+855254.081: mmal: mmal_pool_initialise_buffer_headers: allocating 740 bytes for payload 3/4
+855254.174: mmal: mmal_component_create_core: created 'ril.camera' 103 3f71aea0
+855267.939: mmal: mmal_port_parameter_set: ril.camera(3:0) port 3f71f4e0, param 3f3aa020 (1004a,20)
+855268.008: mmal: mmal_ril_find_parameter_id: searching 149 params for id 0x0001004a
+855268.082: mmal: mmal_ril_find_parameter_id: found it
+855268.156: mmal: mmal_ril_port_parameter_set: setting id 0x0001004a result 0:SUCCESS
+855268.963: mmal: mmal_port_parameter_set: ril.camera(3:1) port 3f7204e0, param 3f3aa020 (1004a,20)
+855269.036: mmal: mmal_ril_find_parameter_id: searching 149 params for id 0x0001004a
+855269.112: mmal: mmal_ril_find_parameter_id: found it
+855269.186: mmal: mmal_ril_port_parameter_set: setting id 0x0001004a result 0:SUCCESS
+855269.590: mmal: mmal_port_parameter_set: ril.camera(3:2) port 3f7214e0, param 3f3aa020 (1004a,20)
+855269.657: mmal: mmal_ril_find_parameter_id: searching 149 params for id 0x0001004a
+855269.722: mmal: mmal_ril_find_parameter_id: found it
+855269.794: mmal: mmal_ril_port_parameter_set: setting id 0x0001004a result 0:SUCCESS
+855270.062: mmal: mmal_port_parameter_set: ril.camera(1:0) port 3f6f7ca0, param 3f3aa020 (10010,12)
+855270.132: mmal: mmal_ril_find_parameter_id: searching 149 params for id 0x00010010
+855270.195: mmal: mmal_ril_find_parameter_id: found it
+855270.270: mmal: mmal_ril_port_parameter_set: setting id 0x00010010 result 0:SUCCESS
+855271.206: mmal: mmal_port_parameter_set: ril.camera(1:0) port 3f6f7ca0, param 3f3aa020 (10037,12)
+855271.275: mmal: mmal_ril_find_parameter_id: searching 149 params for id 0x00010037
+855271.343: mmal: mmal_ril_find_parameter_id: found it
+855271.416: mmal: mmal_ril_port_parameter_set: setting id 0x00010037 result 0:SUCCESS
+855271.714: mmal: mmal_pool_create_with_allocator: allocating 48 + 24 + 472 * 4 bytes for pool
+855271.880: mmal: mmal_port_enable: ril.camera:ctr:0 port 3f6f7ca0, cb 3edf1756, buffers (4/0/4,740/0/740)
+855272.148: mmal: mmal_port_parameter_set: ril.camera(1:0) port 3f6f7ca0, param 3f3aa020 (10015,48)
+855272.219: mmal: mmal_ril_find_parameter_id: searching 149 params for id 0x00010015
+855272.282: mmal: mmal_ril_find_parameter_id: found it
+855272.377: mmal: mmal_ril_port_parameter_set: setting id 0x00010015 result 0:SUCCESS
+855272.893: mmal: mmal_port_format_commit: ril.camera(3:0) port 3f71f4e0 format 3:OPQV
+855272.968: mmal: mmal_ril_set_port_settings: ril port index 70, color format 20
+855273.984: mmal: mmal_port_format_commit: ril.camera(3:1) port 3f7204e0 format 3:OPQV
+855274.061: mmal: mmal_ril_set_port_settings: ril port index 71, color format 20
+855274.676: mmal: mmal_port_format_commit: ril.camera(3:2) port 3f7214e0 format 3:OPQV
+855275.294: mmal: mmal_component_enable: ril.camera 103
+855280.507: rtos_pool_aligned_malloc: Out of heap from allocating 1717988464 bytes 0x4 align (call from 0x3ee6fa06)
+855281.759: mmal: mmal_port_disable: ril.camera(1:0) port 3f6f7ca0
+855281.829: mmal: mmal_port_disable_internal: ril.camera:ctr:0 waiting for 0 buffers left in transit
+855281.896: mmal: mmal_port_disable_internal: ril.camera:ctr:0 has no buffers left in transit
+855282.777: mmal: mmal_component_destroy: ril.camera 103
+855282.849: mmal: mmal_component_release_internal: ril.camera 103 preparing for destruction
+855282.920: mmal: mmal_port_disconnect: ril.camera:out:0(OPQV)(3f71f4e0)
+855282.988: mmal: mmal_port_disconnect: ril.camera:out:0(OPQV)(3f71f4e0) is not connected
+855283.052: mmal: mmal_port_disconnect: ril.camera:out:1(OPQV)(3f7204e0)
+855283.122: mmal: mmal_port_disconnect: ril.camera:out:1(OPQV)(3f7204e0) is not connected
+855283.190: mmal: mmal_port_disconnect: ril.camera:out:2(OPQV)(3f7214e0)
+855283.252: mmal: mmal_port_disconnect: ril.camera:out:2(OPQV)(3f7214e0) is not connected
+855283.311: mmal: mmal_port_disconnect: ril.camera:clk:0(3f722520)
+855283.382: mmal: mmal_port_disconnect: ril.camera:clk:0(3f722520) is not connected
+855283.449: mmal: mmal_component_destroy_internal: ril.camera 103
+855285.126: mmal: mmal_port_free: ril.camera:out:0(OPQV) at 3f71f4e0
+855285.203: mmal: mmal_port_free: ril.camera:out:1(OPQV) at 3f7204e0
+855285.279: mmal: mmal_port_free: ril.camera:out:2(OPQV) at 3f7214e0
+855285.373: mmal: mmal_port_free: ril.camera:clk:0 at 3f722520
+855285.491: mmal: mmal_port_free: ril.camera:ctr:0 at 3f6f7ca0
