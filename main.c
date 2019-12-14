@@ -22,8 +22,8 @@
 #define VIDEO_OUTPUT_BUFFERS_NUM 3
 
 #define DEFAULT_FRAMERATE 25
-#define DEFAULT_WIDTH 0
-#define DEFAULT_HEIGHT 0
+#define DEFAULT_WIDTH 1920
+#define DEFAULT_HEIGHT 1080
 #define DEFAULT_CAMERA_NUM 0
 
 #define DEFAULT_ENCODING MMAL_ENCODING_H264
@@ -31,6 +31,19 @@
 #define DEFAULT_ENCODING_LEVEL MMAL_VIDEO_LEVEL_H264_42
 
 #define DEFAULT_SENSOR_MODE 0
+
+void __cyg_profile_func_enter (void *this_fn, void *call_site) __attribute__((no_instrument_function));
+void __cyg_profile_func_exit  (void *this_fn, void *call_site) __attribute__((no_instrument_function));
+
+void __cyg_profile_func_enter (void *this_fn, void *call_site)
+{
+// printf("Function Entry : %p %p \n", this_fn, call_site);
+}
+
+void __cyg_profile_func_exit (void *this_fn, void *call_site)
+{
+// printf("Function Exit : %p %p \n", this_fn, call_site);
+}
 
 const int camera_num = 0;
 
@@ -208,7 +221,8 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
     //     goto error;
     // }
 
-    MMAL_PARAMETER_INT32_T camera_num = {{MMAL_PARAMETER_CAMERA_NUM, sizeof(camera_num)}, state->cameraNum};
+    MMAL_PARAMETER_INT32_T camera_num = 
+        {{MMAL_PARAMETER_CAMERA_NUM, sizeof(camera_num)}, state->cameraNum};
 
     status = mmal_port_parameter_set(camera->control, &camera_num.hdr);
 
@@ -223,10 +237,10 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
         goto error;
     }
 
-    // if ((status = mmal_port_parameter_set_uint32(camera->control, MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG, state->sensor_mode)) != MMAL_SUCCESS) {
-    //     fprintf(stderr, "Could not set sensor mode\n");
-    //     goto error;
-    // }
+    if ((status = mmal_port_parameter_set_uint32(camera->control, MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG, state->sensor_mode)) != MMAL_SUCCESS) {
+        fprintf(stderr, "Could not set sensor mode\n");
+        goto error;
+    }
 
 
     preview_port = camera->output[MMAL_CAMERA_PREVIEW_PORT];
@@ -243,26 +257,52 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
 
     fprintf(stderr, "size: %dx%d - %d\n", state->width, state->height, state->framerate);
 
-    // i don't know why but this makes us get an error:
-    //    rtos_pool_aligned_malloc: Out of heap from allocating 1717988464 bytes 0x4 align (call from 0x3ee6fa06)  
-    // {
-    // //  set up the camera configuration {
-    //     MMAL_PARAMETER_CAMERA_CONFIG_T cam_config =
-    //     {
-    //         { MMAL_PARAMETER_CAMERA_CONFIG, sizeof(cam_config) },
-    //         .max_stills_w = state->width,
-    //         .max_stills_h = state->height,
-    //         .stills_yuv422 = 0,
-    //         .one_shot_stills = 0,
-    //         .max_preview_video_w = state->width,
-    //         .max_preview_video_h = state->height,
-    //         .num_preview_video_frames = 3 + vcos_max(0, (state->framerate-30)/10),
-    //         .stills_capture_circular_buffer_height = 0,
-    //         .fast_preview_resume = 0,
-    //         .use_stc_timestamp = MMAL_PARAM_TIMESTAMP_MODE_RAW_STC
-    //     };
-    //     mmal_port_parameter_set(camera->control, &cam_config.hdr);
-    // }
+    //    i don't know why but this makes us get an error:
+    //   rtos_pool_aligned_malloc: Out of heap from allocating 1717988464 bytes 0x4 align (call from 0x3ee6fa06)  
+
+    //  set up the camera configuration {
+    MMAL_PARAMETER_CAMERA_CONFIG_T cam_config;
+    memset(&cam_config, 0, sizeof(cam_config));
+    cam_config.hdr.id = MMAL_PARAMETER_CAMERA_CONFIG;
+    // cam_config.hdr.id = 0x3f3aeb70;
+    cam_config.hdr.size = sizeof(cam_config);
+
+    if ((status = mmal_port_parameter_get(camera->control, &cam_config.hdr)) != MMAL_SUCCESS) {
+        fprintf(stderr, "could not get camera config: %s\n", mmal_status_to_string(status));
+        goto error;
+    }
+
+    fprintf(stderr, "defaultl camera config: %dx%d - %dx%d - %d\n", 
+        cam_config.max_stills_w, cam_config.max_stills_h, 
+        cam_config.max_preview_video_w, cam_config.max_preview_video_h,
+        cam_config.num_preview_video_frames);
+
+
+    cam_config.max_stills_w = state->width;
+    cam_config.max_stills_h = state->height;
+    cam_config.stills_yuv422 = 0;
+    cam_config.one_shot_stills = 0;
+    cam_config.max_preview_video_w = state->width;
+    cam_config.max_preview_video_h = state->height;
+    cam_config.num_preview_video_frames = 3,
+    cam_config.stills_capture_circular_buffer_height = 0;
+    cam_config.fast_preview_resume = 0;
+    cam_config.use_stc_timestamp = MMAL_PARAM_TIMESTAMP_MODE_RAW_STC;
+
+    if ((status = mmal_port_parameter_set(camera->control, &cam_config.hdr)) != MMAL_SUCCESS) {
+        fprintf(stderr, "could not set camera config: %s\n", mmal_status_to_string(status));
+        goto error;
+    }
+
+    if ((status = mmal_port_parameter_get(camera->control, &cam_config.hdr)) != MMAL_SUCCESS) {
+        fprintf(stderr, "could not get camera config: %s\n", mmal_status_to_string(status));
+        goto error;
+    }
+
+    fprintf(stderr, "final camera config: %dx%d - %dx%d - %d\n", 
+        cam_config.max_stills_w, cam_config.max_stills_h, 
+        cam_config.max_preview_video_w, cam_config.max_preview_video_h,
+        cam_config.num_preview_video_frames);
 
     // Now set up the port formats
 
@@ -291,7 +331,7 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
         goto error;
     }
 
-    // Set the encode format on the video  port
+    // // Set the encode format on the video  port
 
     format = video_port->format;
     format->encoding_variant = MMAL_ENCODING_I420;

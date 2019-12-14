@@ -1,11 +1,12 @@
 
 #CC=arm-linux-gnueabihf-gcc
+CC=gcc
 #CFLAGS=-g -I/opt/vc/include -Iinclude -D_REENTRANT \
 	-DVCHI_BULK_GRANULARITY=1 -DOMX_SKIP64BIT -DEGL_SERVER_DISPMANX \
 	-D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 \
 	-D_GNU_SOURCE -mcpu=arm1176jzf-s -mfpu=vfp -mfloat-abi=hard -marm \
 	-Wno-multichar -Wall -Wno-unused-but-set-variable -fPIC
-CFLAGS=-I/opt/vc/include -Iinclude -g
+CFLAGS=-I/opt/vc/include -g -Iinclude -finstrument-functions
 CFLAGS+=-DEGL_SERVER_DISPMANX -DHAVE_CMAKE_CONFIG -DHAVE_VMCS_CONFIG \
 	-DOMX_SKIP64BIT -DTV_SUPPORTED_MODE_NO_DEPRECATED -DUSE_VCHIQ_ARM \
 	-DVCHI_BULK_ALIGN=1 -DVCHI_BULK_GRANULARITY=1 -D_FILE_OFFSET_BITS=64 \
