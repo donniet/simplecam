@@ -263,20 +263,11 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
     //  set up the camera configuration {
     MMAL_PARAMETER_CAMERA_CONFIG_T cam_config;
     memset(&cam_config, 0, sizeof(cam_config));
+
+
     cam_config.hdr.id = MMAL_PARAMETER_CAMERA_CONFIG;
     // cam_config.hdr.id = 0x3f3aeb70;
     cam_config.hdr.size = sizeof(cam_config);
-
-    if ((status = mmal_port_parameter_get(camera->control, &cam_config.hdr)) != MMAL_SUCCESS) {
-        fprintf(stderr, "could not get camera config: %s\n", mmal_status_to_string(status));
-        goto error;
-    }
-
-    fprintf(stderr, "defaultl camera config: %dx%d - %dx%d - %d\n", 
-        cam_config.max_stills_w, cam_config.max_stills_h, 
-        cam_config.max_preview_video_w, cam_config.max_preview_video_h,
-        cam_config.num_preview_video_frames);
-
 
     cam_config.max_stills_w = state->width;
     cam_config.max_stills_h = state->height;
@@ -284,7 +275,7 @@ MMAL_STATUS_T create_camera_component(state_t * state) {
     cam_config.one_shot_stills = 0;
     cam_config.max_preview_video_w = state->width;
     cam_config.max_preview_video_h = state->height;
-    cam_config.num_preview_video_frames = 3,
+    cam_config.num_preview_video_frames = 3 + (state->framerate < 30 ? 0 : (state->framerate - 30)/10);
     cam_config.stills_capture_circular_buffer_height = 0;
     cam_config.fast_preview_resume = 0;
     cam_config.use_stc_timestamp = MMAL_PARAM_TIMESTAMP_MODE_RAW_STC;
@@ -639,15 +630,20 @@ static void encoder_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * b
     MMAL_BUFFER_HEADER_T * new_buffer;
     size_t bytes_written = 0;
 
+    fprintf(stderr, "buffer callback\n");
+
     state_t * state = (state_t*)port->userdata;
 
     if (buffer->length > 0) {
         mmal_buffer_header_mem_lock(buffer);
 
         if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_CODECSIDEINFO) {
+            fprintf(stderr, "got motion vectors\n");
             // motion vectors
             // do nothing for now
+            bytes_written = buffer->length;
         } else if (state->video_file != NULL) {
+            fprintf(stderr, "writing video data\n");
             // video data
             bytes_written = fwrite(buffer->data, 1, buffer->length, state->video_file);
 
@@ -658,6 +654,7 @@ static void encoder_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * b
 
     if (bytes_written != buffer->length) {
         // some sort of problem, abort
+        fprintf(stderr, "not enough bytes written, got %d written %d\n", buffer->length, bytes_written);
         state->abort = 1;
     }
 
@@ -683,6 +680,7 @@ int main(int ac, char ** av) {
 
     initialize_state(&state);
 
+    MMAL_PORT_T * camera_preview_port = NULL;
     MMAL_PORT_T * camera_video_port = NULL;
     MMAL_PORT_T * camera_still_port = NULL;
     MMAL_PORT_T * encoder_input_port = NULL;
@@ -714,6 +712,7 @@ int main(int ac, char ** av) {
         goto cleanup;
     }
 
+    camera_preview_port = state.camera->output[MMAL_CAMERA_PREVIEW_PORT];
     camera_video_port = state.camera->output[MMAL_CAMERA_VIDEO_PORT];
     camera_still_port = state.camera->output[MMAL_CAMERA_CAPTURE_PORT];
     encoder_input_port = state.encoder->input[0];
@@ -738,6 +737,28 @@ int main(int ac, char ** av) {
         goto cleanup;
     }
 
+    int num = mmal_queue_length(state.encoder_pool->queue);
+    for(; num > 0; num--) {
+        MMAL_BUFFER_HEADER_T * buffer = mmal_queue_get(state.encoder_pool->queue);
+
+        if (!buffer) {
+            fprintf(stderr, "unable to get a required buffer %d from the pool\n", num);
+            continue;
+        }
+
+        if(mmal_port_send_buffer(encoder_output_port, buffer) != MMAL_SUCCESS) {
+            fprintf(stderr, "unable to send buffer to encoder output port\n");
+            continue;
+        }
+        fprintf(stderr, "enabled buffer %d\n", num);
+    }
+
+    
+    if((status = mmal_port_parameter_set_boolean(camera_video_port, MMAL_PARAMETER_CAPTURE, MMAL_TRUE)) != MMAL_SUCCESS) {
+        fprintf(stderr, "unable to start capture: %s\n", mmal_status_to_string(status));
+        goto cleanup;
+    }
+
     signal(SIGINT, handle_interrupt);
 
     // TODO: temporary, instead use condition variables
@@ -748,6 +769,7 @@ int main(int ac, char ** av) {
     
 
 cleanup:
+    fprintf(stderr, "cleaning up...\n");
 
     mmal_status_to_int(status);
 
