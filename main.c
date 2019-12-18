@@ -1,6 +1,7 @@
 
 #include "state.h"
 #include "components.h"
+#include "server.h"
 
 #include "bcm_host.h"
 #include "interface/vcos/vcos.h"
@@ -30,6 +31,7 @@
 #define DEFAULT_FRAMERATE 25
 #define DEFAULT_WIDTH 1920
 #define DEFAULT_HEIGHT 1080
+#define DEFAULT_BITRATE 17000000
 #define DEFAULT_CAMERA_NUM 0
 
 #define DEFAULT_ENCODING MMAL_ENCODING_H264
@@ -58,16 +60,19 @@ void initialize_state(state_t * state) {
     state->profile = DEFAULT_ENCODING_PROFILE;
     state->level = DEFAULT_ENCODING_LEVEL;
     state->sensor_mode = DEFAULT_SENSOR_MODE;
+    state->bitrate = DEFAULT_BITRATE;
     state->abort = 0;
-    state->video_file = NULL;
+    // state->video_file = NULL;
 }
+
+
 
 
 static void encoder_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * buffer) {
     MMAL_BUFFER_HEADER_T * new_buffer;
     size_t bytes_written = 0;
 
-    fprintf(stderr, "buffer callback\n");
+    // fprintf(stderr, "buffer callback\n");
 
     state_t * state = (state_t*)port->userdata;
 
@@ -75,14 +80,16 @@ static void encoder_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * b
         mmal_buffer_header_mem_lock(buffer);
 
         if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_CODECSIDEINFO) {
-            fprintf(stderr, "got motion vectors\n");
+            // fprintf(stderr, "got motion vectors\n");
             // motion vectors
             // do nothing for now
             bytes_written = buffer->length;
-        } else if (state->video_file != NULL) {
-            fprintf(stderr, "writing video data\n");
+        } else {
+            // fprintf(stderr, "writing video data\n");
             // video data
-            bytes_written = fwrite(buffer->data, 1, buffer->length, state->video_file);
+            server_write(&state->server, buffer->data, buffer->length);
+            bytes_written = buffer->length;
+            // bytes_written = fwrite(buffer->data, 1, buffer->length, state->video_file);
 
         }
 
@@ -123,15 +130,22 @@ int main(int ac, char ** av) {
     MMAL_PORT_T * encoder_input_port = NULL;
     MMAL_PORT_T * encoder_output_port = NULL;
 
-    if (ac > 1) {
-        if ((state.video_file = fopen(av[1], "wb+")) == NULL) {
-            perror(av[1]);
-            exit(-1);
-        }
+    bcm_host_init();
+    vcos_log_register("simplecam", VCOS_LOG_CATEGORY);
+
+    if (server_create(&state.server, 8888) != 0) {
+        fprintf(stderr, "could not create server\n");
+        vcos_log_error("could not create server");
+        goto cleanup;
     }
 
-    bcm_host_init();
-    vcos_log_register("SimpleCam", VCOS_LOG_CATEGORY);
+    // if (ac > 1) {
+    //     if ((state.video_file = fopen(av[1], "wb+")) == NULL) {
+    //         perror(av[1]);
+    //         exit(-1);
+    //     }
+    // }
+
 
     get_sensor_defaults(state.cameraNum, state.camera_name, &state.width, &state.height);
 
@@ -210,6 +224,8 @@ cleanup:
 
     mmal_status_to_int(status);
 
+    server_close(&state.server);
+
     if (state.encoder_connection != NULL) {
         if (state.encoder_connection->is_enabled) {
             mmal_connection_disable(state.encoder_connection);
@@ -233,9 +249,9 @@ cleanup:
         mmal_component_destroy(state.encoder);
     }
 
-    if (state.video_file != NULL) {
-        fclose(state.video_file);
-    }
+    // if (state.video_file != NULL) {
+    //     fclose(state.video_file);
+    // }
 
     return exit_code;
 }

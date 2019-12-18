@@ -1,6 +1,8 @@
 #ifndef __STATE_H__
 #define __STATE_H__
 
+#include "server.h"
+
 #include "interface/mmal/mmal.h"
 #include "interface/mmal/util/mmal_connection.h"
 
@@ -24,7 +26,7 @@ typedef struct {
     int sensor_mode;
     int abort;
 
-    FILE * video_file;
+    server_t server;
 } state_t;
 
 #endif

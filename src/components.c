@@ -364,6 +364,8 @@ MMAL_STATUS_T create_encoder_component(state_t * state) {
     encoder_output->format->es->video.frame_rate.num = 0;
     encoder_output->format->es->video.frame_rate.den = 1;
 
+    mmal_log_dump_format(encoder_output->format);
+
     // Commit the port changes to the output port
     status = mmal_port_format_commit(encoder_output);
 
