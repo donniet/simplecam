@@ -26,7 +26,13 @@ typedef struct {
     int sensor_mode;
     int abort;
 
-    server_t server;
+    int iso;
+    int video_stabilization;
+    MMAL_PARAM_EXPOSUREMETERINGMODE_T metering_mode;
+    MMAL_PARAM_FLICKERAVOID_T flicker_avoid_mode;
+
+    server_t video_server;
+    server_t motion_server;
 } state_t;
 
 #endif

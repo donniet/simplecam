@@ -31,7 +31,7 @@
 #define DEFAULT_FRAMERATE 25
 #define DEFAULT_WIDTH 1920
 #define DEFAULT_HEIGHT 1080
-#define DEFAULT_BITRATE 17000000
+#define DEFAULT_BITRATE 25000000
 #define DEFAULT_CAMERA_NUM 0
 
 #define DEFAULT_ENCODING MMAL_ENCODING_H264
@@ -39,6 +39,10 @@
 #define DEFAULT_ENCODING_LEVEL MMAL_VIDEO_LEVEL_H264_42
 
 #define DEFAULT_SENSOR_MODE 0
+#define DEFAULT_ISO 0
+#define DEFAULT_METERING_MODE MMAL_PARAM_EXPOSUREMETERINGMODE_AVERAGE
+#define DEFAULT_VIDEO_STABILIZATION 0
+#define DEFAULT_FLICKERAVOID_MODE MMAL_PARAM_FLICKERAVOID_60HZ
 
 VCOS_SEMAPHORE_T interrupt;
 
@@ -61,6 +65,11 @@ void initialize_state(state_t * state) {
     state->level = DEFAULT_ENCODING_LEVEL;
     state->sensor_mode = DEFAULT_SENSOR_MODE;
     state->bitrate = DEFAULT_BITRATE;
+    state->iso = DEFAULT_ISO;
+    state->metering_mode = DEFAULT_METERING_MODE;
+    state->video_stabilization = DEFAULT_VIDEO_STABILIZATION;
+    state->flicker_avoid_mode = DEFAULT_FLICKERAVOID_MODE;
+
     state->abort = 0;
     // state->video_file = NULL;
 }
@@ -83,11 +92,12 @@ static void encoder_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * b
             // fprintf(stderr, "got motion vectors\n");
             // motion vectors
             // do nothing for now
+            server_write(&state->motion_server, buffer->data, buffer->length);
             bytes_written = buffer->length;
         } else {
             // fprintf(stderr, "writing video data\n");
             // video data
-            server_write(&state->server, buffer->data, buffer->length);
+            server_write(&state->video_server, buffer->data, buffer->length);
             bytes_written = buffer->length;
             // bytes_written = fwrite(buffer->data, 1, buffer->length, state->video_file);
 
@@ -133,19 +143,16 @@ int main(int ac, char ** av) {
     bcm_host_init();
     vcos_log_register("simplecam", VCOS_LOG_CATEGORY);
 
-    if (server_create(&state.server, 8888) != 0) {
+    if (server_create(&state.video_server, 8888) != 0) {
         fprintf(stderr, "could not create server\n");
         vcos_log_error("could not create server");
         goto cleanup;
     }
 
-    // if (ac > 1) {
-    //     if ((state.video_file = fopen(av[1], "wb+")) == NULL) {
-    //         perror(av[1]);
-    //         exit(-1);
-    //     }
-    // }
-
+    if (server_create(&state.motion_server, 8889) != 0) {
+        fprintf(stderr, "could not create motion vector server\n");
+        goto cleanup;
+    }
 
     get_sensor_defaults(state.cameraNum, state.camera_name, &state.width, &state.height);
 
@@ -224,7 +231,8 @@ cleanup:
 
     mmal_status_to_int(status);
 
-    server_close(&state.server);
+    server_close(&state.video_server);
+    server_close(&state.motion_server);
 
     if (state.encoder_connection != NULL) {
         if (state.encoder_connection->is_enabled) {

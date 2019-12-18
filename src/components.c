@@ -118,198 +118,222 @@ void default_camera_control_callback(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *bu
 
 
 MMAL_STATUS_T create_camera_component(state_t * state) {
-    MMAL_COMPONENT_T *camera = 0;
-    MMAL_ES_FORMAT_T *format;
-    MMAL_PORT_T *preview_port = NULL, *video_port = NULL, *still_port = NULL;
-    MMAL_STATUS_T status;
+   MMAL_COMPONENT_T *camera = 0;
+   MMAL_ES_FORMAT_T *format;
+   MMAL_PORT_T *preview_port = NULL, *video_port = NULL, *still_port = NULL;
+   MMAL_STATUS_T status;
 
-    /* Create the component */
-    status = mmal_component_create(MMAL_COMPONENT_DEFAULT_CAMERA, &camera);
+   /* Create the component */
+   status = mmal_component_create(MMAL_COMPONENT_DEFAULT_CAMERA, &camera);
 
-    if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "Failed to create camera component\n");
-        goto error;
-    }
+   if (status != MMAL_SUCCESS) {
+      fprintf(stderr, "Failed to create camera component\n");
+      goto error;
+   }
 
-    // MMAL_PARAMETER_STEREOSCOPIC_MODE_T stereo_mode = { { MMAL_STEREOSCOPIC_MODE_NONE }, MMAL_FALSE, MMAL_FALSE };
+   // MMAL_PARAMETER_STEREOSCOPIC_MODE_T stereo_mode = { { MMAL_STEREOSCOPIC_MODE_NONE }, MMAL_FALSE, MMAL_FALSE };
 
-    // status = raspicamcontrol_set_stereo_mode(camera->output[0], &stereo_mode);
-    // status += raspicamcontrol_set_stereo_mode(camera->output[1], &stereo_mode);
-    // status += raspicamcontrol_set_stereo_mode(camera->output[2], &stereo_mode);
+   // status = raspicamcontrol_set_stereo_mode(camera->output[0], &stereo_mode);
+   // status += raspicamcontrol_set_stereo_mode(camera->output[1], &stereo_mode);
+   // status += raspicamcontrol_set_stereo_mode(camera->output[2], &stereo_mode);
 
-    // if (status != MMAL_SUCCESS) {
-    //     fprintf(stderr, "Could not set stereo mode : error %d\n", status);
-    //     goto error;
-    // }
+   // if (status != MMAL_SUCCESS) {
+   //     fprintf(stderr, "Could not set stereo mode : error %d\n", status);
+   //     goto error;
+   // }
 
-    MMAL_PARAMETER_INT32_T camera_num = 
-        {{MMAL_PARAMETER_CAMERA_NUM, sizeof(camera_num)}, state->cameraNum};
+   MMAL_PARAMETER_INT32_T camera_num = 
+      {{MMAL_PARAMETER_CAMERA_NUM, sizeof(camera_num)}, state->cameraNum};
 
-    status = mmal_port_parameter_set(camera->control, &camera_num.hdr);
+   status = mmal_port_parameter_set(camera->control, &camera_num.hdr);
 
-    if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "Could not select camera : error %d\n", status);
-        goto error;
-    }
+   if (status != MMAL_SUCCESS) {
+      fprintf(stderr, "Could not select camera : error %d\n", status);
+      goto error;
+   }
 
-    if (!camera->output_num) {
-        status = MMAL_ENOSYS;
-        fprintf(stderr, "Camera doesn't have output ports\n");
-        goto error;
-    }
+   if (!camera->output_num) {
+      status = MMAL_ENOSYS;
+      fprintf(stderr, "Camera doesn't have output ports\n");
+      goto error;
+   }
 
-    if ((status = mmal_port_parameter_set_uint32(camera->control, MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG, state->sensor_mode)) != MMAL_SUCCESS) {
-        fprintf(stderr, "Could not set sensor mode\n");
-        goto error;
-    }
-
-
-    preview_port = camera->output[MMAL_CAMERA_PREVIEW_PORT];
-    video_port = camera->output[MMAL_CAMERA_VIDEO_PORT];
-    still_port = camera->output[MMAL_CAMERA_CAPTURE_PORT];
-
-    // Enable the camera, and tell it its control callback function
-    status = mmal_port_enable(camera->control, default_camera_control_callback);
-
-    if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "Unable to enable control port : error %d\n", status);
-        goto error;
-    }
-
-    fprintf(stderr, "size: %dx%d - %d\n", state->width, state->height, state->framerate);
-
-    //    i don't know why but this makes us get an error:
-    //   rtos_pool_aligned_malloc: Out of heap from allocating 1717988464 bytes 0x4 align (call from 0x3ee6fa06)  
-
-    //  set up the camera configuration {
-    MMAL_PARAMETER_CAMERA_CONFIG_T cam_config;
-    memset(&cam_config, 0, sizeof(cam_config));
+   if ((status = mmal_port_parameter_set_uint32(camera->control, MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG, state->sensor_mode)) != MMAL_SUCCESS) {
+      fprintf(stderr, "Could not set sensor mode\n");
+      goto error;
+   }
 
 
-    cam_config.hdr.id = MMAL_PARAMETER_CAMERA_CONFIG;
-    // cam_config.hdr.id = 0x3f3aeb70;
-    cam_config.hdr.size = sizeof(cam_config);
+   preview_port = camera->output[MMAL_CAMERA_PREVIEW_PORT];
+   video_port = camera->output[MMAL_CAMERA_VIDEO_PORT];
+   still_port = camera->output[MMAL_CAMERA_CAPTURE_PORT];
 
-    cam_config.max_stills_w = state->width;
-    cam_config.max_stills_h = state->height;
-    cam_config.stills_yuv422 = 0;
-    cam_config.one_shot_stills = 0;
-    cam_config.max_preview_video_w = state->width;
-    cam_config.max_preview_video_h = state->height;
-    cam_config.num_preview_video_frames = 3 + (state->framerate < 30 ? 0 : (state->framerate - 30)/10);
-    cam_config.stills_capture_circular_buffer_height = 0;
-    cam_config.fast_preview_resume = 0;
-    cam_config.use_stc_timestamp = MMAL_PARAM_TIMESTAMP_MODE_RAW_STC;
+   // Enable the camera, and tell it its control callback function
+   status = mmal_port_enable(camera->control, default_camera_control_callback);
 
-    if ((status = mmal_port_parameter_set(camera->control, &cam_config.hdr)) != MMAL_SUCCESS) {
-        fprintf(stderr, "could not set camera config: %s\n", mmal_status_to_string(status));
-        goto error;
-    }
+   if (status != MMAL_SUCCESS) {
+      fprintf(stderr, "Unable to enable control port : error %d\n", status);
+      goto error;
+   }
 
-    if ((status = mmal_port_parameter_get(camera->control, &cam_config.hdr)) != MMAL_SUCCESS) {
-        fprintf(stderr, "could not get camera config: %s\n", mmal_status_to_string(status));
-        goto error;
-    }
+   fprintf(stderr, "size: %dx%d - %d\n", state->width, state->height, state->framerate);
 
-    fprintf(stderr, "final camera config: %dx%d - %dx%d - %d\n", 
-        cam_config.max_stills_w, cam_config.max_stills_h, 
-        cam_config.max_preview_video_w, cam_config.max_preview_video_h,
-        cam_config.num_preview_video_frames);
+   //    i don't know why but this makes us get an error:
+   //   rtos_pool_aligned_malloc: Out of heap from allocating 1717988464 bytes 0x4 align (call from 0x3ee6fa06)  
 
-    // Now set up the port formats
-
-    // Set the encode format on the Preview port
-    // HW limitations mean we need the preview to be the same size as the required recorded output
-
-    format = preview_port->format;
-
-    format->encoding = MMAL_ENCODING_OPAQUE;
-    format->encoding_variant = MMAL_ENCODING_I420;
-    format->es->video.width = VCOS_ALIGN_UP(state->width, 32);
-    format->es->video.height = VCOS_ALIGN_UP(state->height, 16);
-    format->es->video.crop.x = 0;
-    format->es->video.crop.y = 0;
-    format->es->video.crop.width = state->width;
-    format->es->video.crop.height = state->height;
-    format->es->video.frame_rate.num = state->framerate;
-    format->es->video.frame_rate.den = 1;
-
-    mmal_log_dump_format(format);
-
-    status = mmal_port_format_commit(preview_port);
-
-    if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "camera viewfinder format couldn't be set\n");
-        goto error;
-    }
-
-    // // Set the encode format on the video  port
-
-    format = video_port->format;
-    format->encoding_variant = MMAL_ENCODING_I420;
-    format->encoding = MMAL_ENCODING_OPAQUE;
-    format->es->video.width = VCOS_ALIGN_UP(state->width, 32);
-    format->es->video.height = VCOS_ALIGN_UP(state->height, 16);
-    format->es->video.crop.x = 0;
-    format->es->video.crop.y = 0;
-    format->es->video.crop.width = state->width;
-    format->es->video.crop.height = state->height;
-    format->es->video.frame_rate.num = state->framerate;
-    format->es->video.frame_rate.den = 1;
-
-    status = mmal_port_format_commit(video_port);
-
-    if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "camera video format couldn't be set\n");
-        goto error;
-    }
-
-    // Ensure there are enough buffers to avoid dropping frames
-    if (video_port->buffer_num < VIDEO_OUTPUT_BUFFERS_NUM)
-        video_port->buffer_num = VIDEO_OUTPUT_BUFFERS_NUM;
+   //  set up the camera configuration {
+   MMAL_PARAMETER_CAMERA_CONFIG_T cam_config;
+   memset(&cam_config, 0, sizeof(cam_config));
 
 
-    // Set the encode format on the still  port
+   cam_config.hdr.id = MMAL_PARAMETER_CAMERA_CONFIG;
+   // cam_config.hdr.id = 0x3f3aeb70;
+   cam_config.hdr.size = sizeof(cam_config);
 
-    format = still_port->format;
+   cam_config.max_stills_w = state->width;
+   cam_config.max_stills_h = state->height;
+   cam_config.stills_yuv422 = 0;
+   cam_config.one_shot_stills = 0;
+   cam_config.max_preview_video_w = state->width;
+   cam_config.max_preview_video_h = state->height;
+   cam_config.num_preview_video_frames = 3 + (state->framerate < 30 ? 0 : (state->framerate - 30)/10);
+   cam_config.stills_capture_circular_buffer_height = 0;
+   cam_config.fast_preview_resume = 0;
+   cam_config.use_stc_timestamp = MMAL_PARAM_TIMESTAMP_MODE_RAW_STC;
 
-    format->encoding = MMAL_ENCODING_OPAQUE;
-    format->encoding_variant = MMAL_ENCODING_I420;
+   if ((status = mmal_port_parameter_set(camera->control, &cam_config.hdr)) != MMAL_SUCCESS) {
+      fprintf(stderr, "could not set camera config: %s\n", mmal_status_to_string(status));
+      goto error;
+   }
 
-    format->es->video.width = VCOS_ALIGN_UP(state->width, 32);
-    format->es->video.height = VCOS_ALIGN_UP(state->height, 16);
-    format->es->video.crop.x = 0;
-    format->es->video.crop.y = 0;
-    format->es->video.crop.width = state->width;
-    format->es->video.crop.height = state->height;
-    format->es->video.frame_rate.num = 0;
-    format->es->video.frame_rate.den = 1;
+   if ((status = mmal_port_parameter_get(camera->control, &cam_config.hdr)) != MMAL_SUCCESS) {
+      fprintf(stderr, "could not get camera config: %s\n", mmal_status_to_string(status));
+      goto error;
+   }
 
-    status = mmal_port_format_commit(still_port);
+   fprintf(stderr, "final camera config: %dx%d - %dx%d - %d\n", 
+      cam_config.max_stills_w, cam_config.max_stills_h, 
+      cam_config.max_preview_video_w, cam_config.max_preview_video_h,
+      cam_config.num_preview_video_frames);
 
-    if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "camera still format couldn't be set\n");
-        goto error;
-    }
+   // Now set up the port formats
 
-    /* Ensure there are enough buffers to avoid dropping frames */
-    if (still_port->buffer_num < VIDEO_OUTPUT_BUFFERS_NUM)
-        still_port->buffer_num = VIDEO_OUTPUT_BUFFERS_NUM;
+   // Set the encode format on the Preview port
+   // HW limitations mean we need the preview to be the same size as the required recorded output
 
-    /* Enable component */
-    status = mmal_component_enable(camera);
+   format = preview_port->format;
 
-    if (status != MMAL_SUCCESS) {
-        fprintf(stderr, "camera component couldn't be enabled\n");
-        goto error;
-    }
+   format->encoding = MMAL_ENCODING_OPAQUE;
+   format->encoding_variant = MMAL_ENCODING_I420;
+   format->es->video.width = VCOS_ALIGN_UP(state->width, 32);
+   format->es->video.height = VCOS_ALIGN_UP(state->height, 16);
+   format->es->video.crop.x = 0;
+   format->es->video.crop.y = 0;
+   format->es->video.crop.width = state->width;
+   format->es->video.crop.height = state->height;
+   format->es->video.frame_rate.num = state->framerate;
+   format->es->video.frame_rate.den = 1;
 
-    // Note: this sets lots of parameters that were not individually addressed before.
-    // raspicamcontrol_set_all_parameters(camera, &state->camera_parameters);
+   mmal_log_dump_format(format);
 
-    state->camera = camera;
+   status = mmal_port_format_commit(preview_port);
 
-    return status;
+   if (status != MMAL_SUCCESS) {
+      fprintf(stderr, "camera viewfinder format couldn't be set\n");
+      goto error;
+   }
+
+   // // Set the encode format on the video  port
+
+   format = video_port->format;
+   format->encoding_variant = MMAL_ENCODING_I420;
+   format->encoding = MMAL_ENCODING_OPAQUE;
+   format->es->video.width = VCOS_ALIGN_UP(state->width, 32);
+   format->es->video.height = VCOS_ALIGN_UP(state->height, 16);
+   format->es->video.crop.x = 0;
+   format->es->video.crop.y = 0;
+   format->es->video.crop.width = state->width;
+   format->es->video.crop.height = state->height;
+   format->es->video.frame_rate.num = state->framerate;
+   format->es->video.frame_rate.den = 1;
+
+   status = mmal_port_format_commit(video_port);
+
+   if (status != MMAL_SUCCESS) {
+      fprintf(stderr, "camera video format couldn't be set\n");
+      goto error;
+   }
+
+   // Ensure there are enough buffers to avoid dropping frames
+   if (video_port->buffer_num < VIDEO_OUTPUT_BUFFERS_NUM)
+      video_port->buffer_num = VIDEO_OUTPUT_BUFFERS_NUM;
+
+
+   // Set the encode format on the still  port
+
+   format = still_port->format;
+
+   format->encoding = MMAL_ENCODING_OPAQUE;
+   format->encoding_variant = MMAL_ENCODING_I420;
+
+   format->es->video.width = VCOS_ALIGN_UP(state->width, 32);
+   format->es->video.height = VCOS_ALIGN_UP(state->height, 16);
+   format->es->video.crop.x = 0;
+   format->es->video.crop.y = 0;
+   format->es->video.crop.width = state->width;
+   format->es->video.crop.height = state->height;
+   format->es->video.frame_rate.num = 0;
+   format->es->video.frame_rate.den = 1;
+
+   status = mmal_port_format_commit(still_port);
+
+   if (status != MMAL_SUCCESS) {
+      fprintf(stderr, "camera still format couldn't be set\n");
+      goto error;
+   }
+
+   /* Ensure there are enough buffers to avoid dropping frames */
+   if (still_port->buffer_num < VIDEO_OUTPUT_BUFFERS_NUM)
+      still_port->buffer_num = VIDEO_OUTPUT_BUFFERS_NUM;
+
+   /* Enable component */
+   status = mmal_component_enable(camera);
+
+   if (status != MMAL_SUCCESS) {
+      fprintf(stderr, "camera component couldn't be enabled\n");
+      goto error;
+   }
+
+   if ((status = mmal_port_parameter_set_uint32(camera->control, MMAL_PARAMETER_ISO, state->iso)) != MMAL_SUCCESS) {
+      fprintf(stderr, "could not set ISO\n");
+      goto error;
+   }
+
+   MMAL_PARAMETER_EXPOSUREMETERINGMODE_T meter_mode = 
+      {{MMAL_PARAMETER_EXP_METERING_MODE,sizeof(meter_mode)}, state->metering_mode};
+   
+   if ((status = mmal_port_parameter_set(camera->control, &meter_mode.hdr)) != MMAL_SUCCESS) {
+      fprintf(stderr, "coul not set metering mode\n");
+      goto error;
+   }
+
+   if ((status = mmal_port_parameter_set_boolean(camera->control, MMAL_PARAMETER_VIDEO_STABILISATION, state->video_stabilization)) != MMAL_SUCCESS) {
+      fprintf(stderr, "could not set video stabiliztaion\n");
+      goto error;
+   }
+
+   MMAL_PARAMETER_FLICKERAVOID_T fl_mode = 
+      {{MMAL_PARAMETER_FLICKER_AVOID,sizeof(fl_mode)}, state->flicker_avoid_mode};
+
+
+   if ((status = mmal_port_parameter_set(camera->control, &fl_mode.hdr)) != MMAL_SUCCESS) {
+      fprintf(stderr, "could not set flicker avoid mode");
+      goto error;
+   }
+   
+   state->camera = camera;
+
+   return status;
 
 error:
 
@@ -349,12 +373,15 @@ MMAL_STATUS_T create_encoder_component(state_t * state) {
     // Only supporting H264 at the moment
     encoder_output->format->encoding = state->encoding;
     encoder_output->format->bitrate = state->bitrate;
-    encoder_output->buffer_size = encoder_output->buffer_size_recommended;
+   //  encoder_output->buffer_size = encoder_output->buffer_size_recommended; // 65536
+    //fprintf(stderr, "buffer size recommended %d\n", encoder_output->buffer_size_recommended);
+    encoder_output->buffer_size = 4 * encoder_output->buffer_size_recommended;
 
     if (encoder_output->buffer_size < encoder_output->buffer_size_min)
         encoder_output->buffer_size = encoder_output->buffer_size_min;
 
     encoder_output->buffer_num = encoder_output->buffer_num_recommended;
+   // encoder_output->buffer_num = 10 * encoder_output->buffer_num_recommended;
 
     if (encoder_output->buffer_num < encoder_output->buffer_num_min)
         encoder_output->buffer_num = encoder_output->buffer_num_min;
