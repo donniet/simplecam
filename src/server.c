@@ -12,7 +12,7 @@
 #include "interface/mmal/mmal_logging.h"
 
 static void * client_thread(void * user) {
-    fprintf(stderr, "client thread starting\n");
+    // fprintf(stderr, "client thread starting\n");
     socket_list_t * s = (socket_list_t*)user;
 
     while(!s->completed) {
@@ -23,6 +23,13 @@ static void * client_thread(void * user) {
         if (s->server->completed) {
             s->completed = 1;
         } else  {
+            // char data[32];
+            // sprintf(data, "fd: %d\n", s->socket);
+            // int w = write(s->socket, data, strlen(data));
+            // if (w < 0 || (size_t)w < strlen(data)) {
+            //     s->completed = 1;
+            // }
+
             int w = write(s->socket, buf->data, buf->length);
             if(w < 0 || (size_t)w < buf->length) {
                 // error, close socket
@@ -64,24 +71,27 @@ int server_write(server_t * server, uint8_t * data, size_t length) {
     // doing this here avoids any race conditions if another write 
     // is called because this is all under a lock
     // and we know the sockets are completed due to the wait
+    
     for(socket_list_t ** l = &server->sockets; *l;) { 
-        if ((*l)->completed) {
+        socket_list_t * p = *l;
+
+        if (p->completed) {
             fprintf(stderr, "socket completed, removing from list\n");
-            if(close((*l)->socket))
+            if(close(p->socket))
                 perror("close status");
 
             fprintf(stderr, "joining thread...\n");
-            pthread_join((*l)->thread, NULL);
+            pthread_join(p->thread, NULL);
             fprintf(stderr, "thread joined.\n");
 
-            // cut this one out of the list, this also advances the iterator
-            *l = (*l)->next;
+            // cut this one out of the list, which also advances l
+            *l = p->next;
             // join the running thread
-            free(*l);
+            free(p);
             server->socket_count--;
         } else {
             // advance the iterator
-            l = &(*l)->next;
+            l = &p->next;
         }
     }
 
@@ -108,7 +118,7 @@ static void * listen_thread(void * user) {
             break;
         }
 
-        fprintf(stderr, "socket accepted, starting client thread\n");
+        // fprintf(stderr, "socket accepted, starting client thread\n");
 
         vcos_mutex_lock(&server->mutex);
         socket_list_t * n = (socket_list_t*)malloc(sizeof(socket_list_t));
@@ -120,7 +130,7 @@ static void * listen_thread(void * user) {
         server->socket_count++;
         vcos_mutex_unlock(&server->mutex);
 
-        fprintf(stderr, "starting client thread.\n");
+        // fprintf(stderr, "starting client thread.\n");
 
 
         if(pthread_create(&n->thread, NULL, client_thread, n) != 0) {
@@ -130,9 +140,13 @@ static void * listen_thread(void * user) {
         }
     }
 
+    perror("\nListener thread");
 
     // now clean up the sockets
+
+    fprintf(stderr, "locking mutex... ");
     vcos_mutex_lock(&server->mutex);
+    fprintf(stderr, "mutex locked\n");
 
     server->completed = 1;
 
@@ -157,18 +171,25 @@ static void * listen_thread(void * user) {
     server->sockets = NULL;
     vcos_mutex_unlock(&server->mutex);
 
-    fprintf(stderr, "listen thread end.\n");
+    // fprintf(stderr, "listen thread end.\n");
     return NULL;
 }
 
 int server_close(server_t * server) {
+    fprintf(stderr, "server closing...");
     if (server->completed) {
         return 0;
     }
 
+    fprintf(stderr, "closing socket: %d...", server->socketfd);
     // closing the main socket should kill the main thread
+    if(shutdown(server->socketfd, SHUT_RDWR) != 0) {
+        perror("close error");
+        exit(-1);
+    }
     close(server->socketfd);
 
+    fprintf(stderr, "joining listener thread...");
     pthread_join(server->listen_thread, NULL);
 
     vcos_mutex_delete(&server->mutex);
