@@ -11,50 +11,28 @@
 
 #include "interface/mmal/mmal_logging.h"
 
-// #define vcos_mutex_lock(X, LOG) \
-//     if(LOG) fprintf(stderr, "%s:%d: vcos_mutex_lock()\n", __FILE__, __LINE__); \
-//     vcos_mutex_lock(X);
-
-// #define vcos_mutex_unlock(X, LOG) \
-//     if(LOG) fprintf(stderr, "%s:%d: vcos_mutex_unlock()\n", __FILE__, __LINE__); \
-//     vcos_mutex_unlock(X);
-
 static void * client_thread(void * user) {
     fprintf(stderr, "client thread starting\n");
     socket_list_t * s = (socket_list_t*)user;
 
-    int socket_completed = 0;
-
-    while(!socket_completed) {
+    while(!s->completed) {
         vcos_semaphore_wait(&s->server->write_ready);
 
         buffer_t * buf = &s->server->buffer;
 
         if (s->server->completed) {
-            socket_completed = 1;
+            s->completed = 1;
         } else  {
-            // int bytes_written = 0;
-            
-            // write until there are no more bytes
-            // while(bytes_written < buf->length) {
-                int w = write(s->socket, buf->data, buf->length);
-                fprintf(stderr, "wrote %d bytes\n", w);
-                if(w < 0 || (size_t)w < buf->length) {
-                    fprintf(stderr, "closing socket\n");
-                    // error, close socket
-                    socket_completed = 1;
-                    perror("write error");
-                    fprintf(stderr, "error writing to socket\n");
-                } 
-            // }
+            int w = write(s->socket, buf->data, buf->length);
+            if(w < 0 || (size_t)w < buf->length) {
+                // error, close socket
+                s->completed = 1;
+            } 
         }
 
         vcos_semaphore_post(&s->server->write_complete);
     }
 
-    s->completed = 1;
-
-    fprintf(stderr, "client thread ending\n");
     return NULL;
 }
 
@@ -69,18 +47,18 @@ int server_write(server_t * server, uint8_t * data, size_t length) {
     server->buffer.data = data;
     server->buffer.length = length;
 
-    fprintf(stderr, "%s:%d: posting %d semaphores... ", __FILE__, __LINE__, server->socket_count);
+    // fprintf(stderr, "%s:%d: posting %d semaphores... ", __FILE__, __LINE__, server->socket_count);
     // post socket_count times
     for(int i = 0; i < server->socket_count; i++) 
         vcos_semaphore_post(&server->write_ready);
 
-    fprintf(stderr, " posted. waiting on %d semaphores...", server->socket_count);
+    // fprintf(stderr, " posted. waiting on %d semaphores...", server->socket_count);
 
     // wait for socket_count times on the complete
     for(int i = 0; i < server->socket_count; i++)
         vcos_semaphore_wait(&server->write_complete);
 
-    fprintf(stderr, " complete.\n");
+    // fprintf(stderr, " complete.\n");
 
     // clean up any completed socket
     // doing this here avoids any race conditions if another write 
