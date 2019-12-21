@@ -30,7 +30,8 @@ static void * client_thread(void * user) {
             //     s->completed = 1;
             // }
 
-            int w = write(s->socket, buf->data, buf->length);
+            int w = send(s->socket, buf->data, buf->length, MSG_NOSIGNAL | MSG_MORE);
+            // int w = write(s->socket, buf->data, buf->length);
             if(w < 0 || (size_t)w < buf->length) {
                 // error, close socket
                 s->completed = 1;
@@ -200,8 +201,6 @@ int server_close(server_t * server) {
 }
 
 int server_create(server_t * server, int portno) {
-    signal(SIGPIPE, SIG_IGN);
-
     struct sockaddr_in serv_addr; 
     int opt = 1; 
     int socketfd = -1;

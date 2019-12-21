@@ -2,6 +2,8 @@
 #ifndef __HTTP_SERVER_H__
 #define __HTTP_SERVER_H__
 
+#include "http_parser.h"
+
 #include <pthread.h>
 #include <stdatomic.h>
 #include <interface/vcos/vcos_mutex.h>
@@ -15,6 +17,8 @@ typedef struct http_processor_tag {
     pthread_t thread;
     struct http_processor_tag * next;
     struct http_server_tag * server;
+    http_parser parser;
+
 } http_processor_t;
 
 typedef struct http_server_tag {

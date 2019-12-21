@@ -154,6 +154,11 @@ int main(int ac, char ** av) {
         goto cleanup;
     }
 
+    if (http_server_create(&state.http_server, 8080) != 0) {
+        fprintf(stderr, "could not create http server\n");
+        goto cleanup;
+    }
+
     get_sensor_defaults(state.cameraNum, state.camera_name, &state.width, &state.height);
 
     fprintf(stderr, "sensor defaults: %s -- %dx%d\n", state.camera_name, state.width, state.height);
@@ -233,6 +238,7 @@ cleanup:
 
     server_close(&state.video_server);
     server_close(&state.motion_server);
+    http_server_destroy(&state.http_server);
 
     if (state.encoder_connection != NULL) {
         if (state.encoder_connection->is_enabled) {

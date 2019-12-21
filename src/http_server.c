@@ -14,23 +14,76 @@
 #include <interface/mmal/mmal_logging.h>
 
 void parse_request(http_processor_t * p, char * buf, int siz) {
+    // get the first line
     
+}
+
+static int parser_message_complete(http_parser * parser) {
+    http_processor_t * p = (http_processor_t*)parser->data;
+
+    return 0;
 }
 
 // maximum requeset size: 4096
 void * processor_thread(void * user) {
+    fprintf(stderr, "starting processor thread.\n");
     http_processor_t * p = (http_processor_t*)user;
+
+    http_parser parser;
+    http_parser_settings parser_settings;
+
+    http_parser_init(&parser, HTTP_REQUEST);
+    parser.data = (void*)p;
+    http_parser_settings_init(&parser_settings);
+    // parser_settings.on_message_complete = parser_message_complete;
 
     static const int bufsiz = 4096;
     char buffer[bufsiz];
 
-    int s = read(p->sock, buffer, bufsiz);
+    fprintf(stderr, "reading from socket\n");
+
+    int s = recv(p->sock, buffer, bufsiz-1, 0);
+    // int s = read(p->sock, buffer, bufsiz-1);
     if (s <= 0) {
         fprintf(stderr, "error or no bytes read from socket\n");
         return NULL;
     }
 
-    parse_request(p, buffer, s);
+    buffer[s] = '\0';
+    fprintf(stderr, "read: %s", buffer);
+
+    int ps;
+    if ((ps = http_parser_execute(&parser, &parser_settings, buffer, s)) < s) {
+        fprintf(stderr, "error: parsed bytes %d of %d\n", ps, s);
+        // TODO: send 4XX error
+        return NULL;
+    }
+
+    fprintf(stderr, "parsed: %d\n", parser.method);
+
+    if (parser.method != HTTP_GET) {
+        // TODO: send 4XX error
+        return NULL;
+    }
+
+
+    shutdown(p->sock, SHUT_RDWR);
+    close(p->sock);
+
+    vcos_mutex_lock(&p->server->mutex);
+    // remove ourselves from the processor list
+    for(http_processor_t ** l = &p->server->processors; *l;) {
+        http_processor_t * pp = *l;
+
+        if (pp == p) {
+            // this is us, cut us out;
+            *l = p->next;
+            p->next = NULL;
+            free(p);
+            break;
+        }
+    }
+    vcos_mutex_unlock(&p->server->mutex);
 
     return NULL;
 }
@@ -42,6 +95,7 @@ void * listen_thread(void * user) {
     unsigned int clilen = sizeof(cli_addr);
 
     while(listen(server->sock, server->wait_queue) == 0) {
+        fprintf(stderr, "accepting socket.\n");
         int new_socket = accept(server->sock, (struct sockaddr*)&cli_addr, &clilen);
         if (new_socket < 0) {
             perror("could not create new socket");
@@ -99,8 +153,6 @@ int http_server_destroy(http_server_t * server) {
 }
 
 int http_server_create(http_server_t * server, int portno) {
-    signal(SIGPIPE, SIG_IGN);
-
     struct sockaddr_in serv_addr;
     int opt = 1;
     int sock = -1;

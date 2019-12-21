@@ -2,6 +2,7 @@
 #define __STATE_H__
 
 #include "server.h"
+#include "http_server.h"
 
 #include "interface/mmal/mmal.h"
 #include "interface/mmal/util/mmal_connection.h"
@@ -33,6 +34,7 @@ typedef struct {
 
     server_t video_server;
     server_t motion_server;
+    http_server_t http_server;
 } state_t;
 
 #endif
