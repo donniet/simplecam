@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -12,6 +13,9 @@
 #include <interface/vcos/vcos.h>
 #include <interface/vcos/vcos_mutex.h>
 #include <interface/mmal/mmal_logging.h>
+
+const char invalid_request[] = "HTTP/1.1 400 Bad Request\nContent-Length: 0\n\n";
+const char ok_message[] = "HTTP/1.1 200 OK\nContent-Type: text/plain\nContent-Length: 2\n\nok";
 
 void parse_request(http_processor_t * p, char * buf, int siz) {
     // get the first line
@@ -28,7 +32,7 @@ static int parser_message_complete(http_parser * parser) {
 void * processor_thread(void * user) {
     fprintf(stderr, "starting processor thread.\n");
     http_processor_t * p = (http_processor_t*)user;
-
+    http_server_t * server = p->server;
     http_parser parser;
     http_parser_settings parser_settings;
 
@@ -39,52 +43,92 @@ void * processor_thread(void * user) {
 
     static const int bufsiz = 4096;
     char buffer[bufsiz];
+    int ps;
+    struct sockaddr_in cli_addr;
+    socklen_t len = sizeof(cli_addr);
+
 
     fprintf(stderr, "reading from socket\n");
 
-    int s = recv(p->sock, buffer, bufsiz-1, 0);
-    // int s = read(p->sock, buffer, bufsiz-1);
-    if (s <= 0) {
-        fprintf(stderr, "error or no bytes read from socket\n");
-        return NULL;
-    }
+    int bytes_read = recv(p->sock, buffer, bufsiz-1, MSG_NOSIGNAL);
 
-    buffer[s] = '\0';
+    fprintf(stderr, "read %d bytes, len %d\n", bytes_read, len);
+    if (bytes_read < 0) {
+        perror("error on socket recv");
+    } 
+
+    if (bytes_read <= 0) {
+        fprintf(stderr, "error or no bytes read from socket\n");
+        goto cleanup;
+    }
+    
+    buffer[bytes_read] = '\0';
     fprintf(stderr, "read: %s", buffer);
 
-    int ps;
-    if ((ps = http_parser_execute(&parser, &parser_settings, buffer, s)) < s) {
-        fprintf(stderr, "error: parsed bytes %d of %d\n", ps, s);
+    if ((ps = http_parser_execute(&parser, &parser_settings, buffer, bytes_read)) < bytes_read) {
+        fprintf(stderr, "error: parsed bytes %d of %d\n", ps, bytes_read);
+        send(p->sock, invalid_request, sizeof(invalid_request), MSG_NOSIGNAL);
         // TODO: send 4XX error
-        return NULL;
+        goto cleanup;
     }
 
     fprintf(stderr, "parsed: %d\n", parser.method);
 
     if (parser.method != HTTP_GET) {
         // TODO: send 4XX error
-        return NULL;
+        send(p->sock, invalid_request, sizeof(invalid_request), MSG_NOSIGNAL);
+        
+        goto cleanup;
     }
 
+    fprintf(stderr, "size: %d\nmessage: %s\n", sizeof(ok_message), ok_message);
+    send(p->sock, ok_message, sizeof(ok_message), MSG_NOSIGNAL);
 
-    shutdown(p->sock, SHUT_RDWR);
+cleanup:
+
+    // shutdown(p->sock, SHUT_RDWR);
     close(p->sock);
+    p->closed = 1;
 
-    vcos_mutex_lock(&p->server->mutex);
-    // remove ourselves from the processor list
-    for(http_processor_t ** l = &p->server->processors; *l;) {
-        http_processor_t * pp = *l;
+    fprintf(stderr, "processor cleanup %x\n", server);
 
-        if (pp == p) {
-            // this is us, cut us out;
-            *l = p->next;
-            p->next = NULL;
-            free(p);
-            break;
+    vcos_semaphore_post(&server->processor_cleanup);
+
+    return NULL;
+}
+
+void * cleanup_thread(void * user) {
+    http_server_t * server = (http_server_t*)user;
+
+    int done = 0;
+
+    while(!done) {
+        fprintf(stderr, "cleanup thread waiting\n");
+        vcos_semaphore_wait(&server->processor_cleanup);
+
+        vcos_mutex_lock(&server->mutex);
+
+        for(http_processor_t ** l = &server->processors; *l;) {
+            http_processor_t * p = *l;
+            
+            if (p->closed || server->completed) {
+                fprintf(stderr, "removing socket: %d\n", p->sock);
+                if (!p->closed) {
+                    close(p->sock);
+                }
+                // unlink this node
+                *l = p->next;
+                p->next = NULL;
+
+                free(p);
+                p->server->processor_count--;
+            }
         }
-    }
-    vcos_mutex_unlock(&p->server->mutex);
 
+        done = server->completed;
+
+        vcos_mutex_unlock(&server->mutex);
+    }
     return NULL;
 }
 
@@ -109,23 +153,26 @@ void * listen_thread(void * user) {
         server->processors = proc;
         proc->server = server;
         server->processor_count++;
+        proc->sock = new_socket;
+        proc->client_addr = cli_addr;
+        proc->closed = 0;
         vcos_mutex_unlock(&server->mutex);
+
+        fprintf(stderr, "client connected: %s:%d\n", inet_ntoa(cli_addr.sin_addr), cli_addr.sin_port);
 
         if(pthread_create(&proc->thread, NULL, processor_thread, proc) != 0) {
             perror("could not create processor thread");
             break;
         }
+        pthread_detach(proc->thread);
     }
 
     vcos_mutex_lock(&server->mutex);
-
     server->completed = 1;
 
     for (http_processor_t * proc = server->processors; proc;) {
-        shutdown(proc->sock, SHUT_RDWR);
+        // shutdown(proc->sock, SHUT_RDWR);
         close(proc->sock);
-
-        pthread_join(proc->thread, NULL);
 
         http_processor_t * t = proc;
         proc = proc->next;
@@ -133,8 +180,10 @@ void * listen_thread(void * user) {
 
         free(t);
     }
-
+    server->processors = NULL;
     vcos_mutex_unlock(&server->mutex);
+
+    vcos_semaphore_post(&server->processor_cleanup);
 
     return NULL;
 }
@@ -146,8 +195,10 @@ int http_server_destroy(http_server_t * server) {
     close(server->sock);
 
     pthread_join(server->listen_thread, NULL);
+    pthread_join(server->cleanup_thread, NULL);
     
     vcos_mutex_delete(&server->mutex);
+    vcos_semaphore_delete(&server->processor_cleanup);
 
     return 0;
 }
@@ -157,6 +208,9 @@ int http_server_create(http_server_t * server, int portno) {
     int opt = 1;
     int sock = -1;
     int mutex_created = 0;
+    int semaphore_created = 0;
+    int listen_thread_started = 0;
+    int cleanup_thread_started = 0;
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
@@ -191,11 +245,21 @@ int http_server_create(http_server_t * server, int portno) {
         goto error;
     }
     mutex_created = 1;
-
+    if(vcos_semaphore_create(&server->processor_cleanup, "http_server_cleanup", 0) != VCOS_SUCCESS) {
+        vcos_log_error("could not create http server semaphore");
+        goto error;
+    }
+    semaphore_created = 1;
     if (pthread_create(&server->listen_thread, NULL, listen_thread, (void*)server) != 0) {
         perror("could not start listener thread");
         goto error;
     }
+    listen_thread_started = 1;
+    if (pthread_create(&server->cleanup_thread, NULL, cleanup_thread, (void*)server) != 0) {
+        perror("could not start cleanup thread");
+        goto error;
+    }
+    cleanup_thread_started = 1;
 
 
     return 0;
@@ -203,8 +267,19 @@ error:
     if (sock > 0) {
         close(sock);
     }
+    server->completed = 1;
     if (mutex_created) {
         vcos_mutex_delete(&server->mutex);
+    }
+    if (semaphore_created) {
+        vcos_semaphore_delete(&server->processor_cleanup);
+    }
+    if (listen_thread_started) {
+        pthread_join(server->listen_thread, NULL);
+    }
+    if (cleanup_thread_started) {
+        vcos_semaphore_post(&server->processor_cleanup);
+        pthread_join(server->cleanup_thread, NULL);
     }
 
     return -1;
