@@ -6,7 +6,7 @@
 
 #include <pthread.h>
 #include <stdatomic.h>
-#include <interface/vcos/vcos_mutex.h>
+#include <semaphore.h>
 #include <netinet/in.h>
 
 struct http_server_tag;
@@ -22,13 +22,13 @@ typedef struct http_processor_tag {
 } http_processor_t;
 
 typedef struct http_server_tag {
+    sem_t processor_cleanup;
     int completed;
     int sock;
     pthread_t listen_thread;
     pthread_t cleanup_thread;
     int wait_queue;
-    VCOS_MUTEX_T mutex;
-    VCOS_SEMAPHORE_T processor_cleanup;
+    pthread_mutex_t mutex;
     struct http_processor_tag * processors;
     atomic_int processor_count;
 } http_server_t;

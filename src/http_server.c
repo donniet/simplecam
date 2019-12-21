@@ -12,6 +12,7 @@
 
 #include <interface/vcos/vcos.h>
 #include <interface/vcos/vcos_mutex.h>
+#include <interface/vcos/vcos_semaphore.h>
 #include <interface/mmal/mmal_logging.h>
 
 const char invalid_request[] = "HTTP/1.1 400 Bad Request\nContent-Length: 0\n\n";
@@ -23,7 +24,7 @@ void parse_request(http_processor_t * p, char * buf, int siz) {
 }
 
 static int parser_message_complete(http_parser * parser) {
-    http_processor_t * p = (http_processor_t*)parser->data;
+    // http_processor_t * p = (http_processor_t*)parser->data;
 
     return 0;
 }
@@ -33,6 +34,7 @@ void * processor_thread(void * user) {
     fprintf(stderr, "starting processor thread.\n");
     http_processor_t * p = (http_processor_t*)user;
     http_server_t * server = p->server;
+
     http_parser parser;
     http_parser_settings parser_settings;
 
@@ -44,20 +46,17 @@ void * processor_thread(void * user) {
     static const int bufsiz = 4096;
     char buffer[bufsiz];
     int ps;
-    struct sockaddr_in cli_addr;
-    socklen_t len = sizeof(cli_addr);
 
 
     fprintf(stderr, "reading from socket\n");
 
     int bytes_read = recv(p->sock, buffer, bufsiz-1, MSG_NOSIGNAL);
 
-    fprintf(stderr, "read %d bytes, len %d\n", bytes_read, len);
+    fprintf(stderr, "read %d bytes\n", bytes_read);
     if (bytes_read < 0) {
         perror("error on socket recv");
-    } 
-
-    if (bytes_read <= 0) {
+        goto cleanup;
+    } else if (bytes_read == 0) {
         fprintf(stderr, "error or no bytes read from socket\n");
         goto cleanup;
     }
@@ -90,9 +89,10 @@ cleanup:
     close(p->sock);
     p->closed = 1;
 
-    fprintf(stderr, "processor cleanup %x\n", server);
+    // fprintf(stderr, "processor cleanup %x\n", server);
+    fprintf(stderr, "server %d\n", server->processor_count);
 
-    vcos_semaphore_post(&server->processor_cleanup);
+    sem_post(&server->processor_cleanup);
 
     return NULL;
 }
@@ -104,9 +104,9 @@ void * cleanup_thread(void * user) {
 
     while(!done) {
         fprintf(stderr, "cleanup thread waiting\n");
-        vcos_semaphore_wait(&server->processor_cleanup);
+        sem_wait(&server->processor_cleanup);
 
-        vcos_mutex_lock(&server->mutex);
+        pthread_mutex_lock(&server->mutex);
 
         for(http_processor_t ** l = &server->processors; *l;) {
             http_processor_t * p = *l;
@@ -127,47 +127,56 @@ void * cleanup_thread(void * user) {
 
         done = server->completed;
 
-        vcos_mutex_unlock(&server->mutex);
+        pthread_mutex_unlock(&server->mutex);
     }
     return NULL;
 }
 
 void * listen_thread(void * user) {
     http_server_t * server = (http_server_t*)user;
+    sem_post(&server->processor_cleanup);
 
     struct sockaddr_in cli_addr;
+    memset(&cli_addr, 0, sizeof(cli_addr));
     unsigned int clilen = sizeof(cli_addr);
+    int new_socket;
 
     while(listen(server->sock, server->wait_queue) == 0) {
         fprintf(stderr, "accepting socket.\n");
-        int new_socket = accept(server->sock, (struct sockaddr*)&cli_addr, &clilen);
+        new_socket = accept(server->sock, (struct sockaddr*)&cli_addr, &clilen);
         if (new_socket < 0) {
             perror("could not create new socket");
             break;
         }
 
         // spawn a processor thread
-        vcos_mutex_lock(&server->mutex);
+        pthread_mutex_lock(&server->mutex);
         http_processor_t * proc = (http_processor_t*)malloc(sizeof(http_processor_t));
-        proc->next = server->processors;
-        server->processors = proc;
         proc->server = server;
-        server->processor_count++;
         proc->sock = new_socket;
         proc->client_addr = cli_addr;
         proc->closed = 0;
-        vcos_mutex_unlock(&server->mutex);
+
+        proc->next = server->processors;
+        server->processors = proc;
+
+        server->processor_count++;
+        pthread_mutex_unlock(&server->mutex);
 
         fprintf(stderr, "client connected: %s:%d\n", inet_ntoa(cli_addr.sin_addr), cli_addr.sin_port);
+
+        sem_post(&server->processor_cleanup);
+        sem_post(&proc->server->processor_cleanup);
 
         if(pthread_create(&proc->thread, NULL, processor_thread, proc) != 0) {
             perror("could not create processor thread");
             break;
         }
+
         pthread_detach(proc->thread);
     }
 
-    vcos_mutex_lock(&server->mutex);
+    pthread_mutex_lock(&server->mutex);
     server->completed = 1;
 
     for (http_processor_t * proc = server->processors; proc;) {
@@ -181,9 +190,9 @@ void * listen_thread(void * user) {
         free(t);
     }
     server->processors = NULL;
-    vcos_mutex_unlock(&server->mutex);
+    pthread_mutex_unlock(&server->mutex);
 
-    vcos_semaphore_post(&server->processor_cleanup);
+    sem_post(&server->processor_cleanup);
 
     return NULL;
 }
@@ -197,8 +206,8 @@ int http_server_destroy(http_server_t * server) {
     pthread_join(server->listen_thread, NULL);
     pthread_join(server->cleanup_thread, NULL);
     
-    vcos_mutex_delete(&server->mutex);
-    vcos_semaphore_delete(&server->processor_cleanup);
+    pthread_mutex_destroy(&server->mutex);
+    sem_destroy(&server->processor_cleanup);
 
     return 0;
 }
@@ -240,15 +249,19 @@ int http_server_create(http_server_t * server, int portno) {
     server->completed = 0;
     server->processor_count = 0;
 
-    if(vcos_mutex_create(&server->mutex, "http_server_mutex") != VCOS_SUCCESS) {
-        vcos_log_error("could not create http server mutex");
+    if(pthread_mutex_init(&server->mutex, NULL) != 0) {
+        perror("could not create http server mutex");
         goto error;
     }
     mutex_created = 1;
-    if(vcos_semaphore_create(&server->processor_cleanup, "http_server_cleanup", 0) != VCOS_SUCCESS) {
-        vcos_log_error("could not create http server semaphore");
+    if(sem_init(&server->processor_cleanup, 0, 0) != 0) {
+        perror("could not create http server semaphore");
         goto error;
     }
+
+    // sem_post(&server->processor_cleanup);
+    // sem_wait(&server->processor_cleanup);
+
     semaphore_created = 1;
     if (pthread_create(&server->listen_thread, NULL, listen_thread, (void*)server) != 0) {
         perror("could not start listener thread");
@@ -268,18 +281,19 @@ error:
         close(sock);
     }
     server->completed = 1;
-    if (mutex_created) {
-        vcos_mutex_delete(&server->mutex);
-    }
-    if (semaphore_created) {
-        vcos_semaphore_delete(&server->processor_cleanup);
-    }
     if (listen_thread_started) {
         pthread_join(server->listen_thread, NULL);
     }
     if (cleanup_thread_started) {
-        vcos_semaphore_post(&server->processor_cleanup);
+        sem_post(&server->processor_cleanup);
         pthread_join(server->cleanup_thread, NULL);
+    }
+    if (semaphore_created) {
+        sem_close(&server->processor_cleanup);
+        sem_destroy(&server->processor_cleanup);
+    }
+    if (mutex_created) {
+        pthread_mutex_destroy(&server->mutex);
     }
 
     return -1;
