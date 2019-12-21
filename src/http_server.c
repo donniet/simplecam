@@ -108,6 +108,8 @@ void * cleanup_thread(void * user) {
 
         pthread_mutex_lock(&server->mutex);
 
+        fprintf(stderr, "before cleanup: %d\n", server->processor_count);
+
         for(http_processor_t ** l = &server->processors; *l;) {
             http_processor_t * p = *l;
             
@@ -124,6 +126,7 @@ void * cleanup_thread(void * user) {
                 p->server->processor_count--;
             }
         }
+        fprintf(stderr, "after cleanup: %d\n", server->processor_count);
 
         done = server->completed;
 
@@ -134,8 +137,6 @@ void * cleanup_thread(void * user) {
 
 void * listen_thread(void * user) {
     http_server_t * server = (http_server_t*)user;
-    sem_post(&server->processor_cleanup);
-
     struct sockaddr_in cli_addr;
     memset(&cli_addr, 0, sizeof(cli_addr));
     unsigned int clilen = sizeof(cli_addr);
@@ -143,6 +144,8 @@ void * listen_thread(void * user) {
 
     while(listen(server->sock, server->wait_queue) == 0) {
         fprintf(stderr, "accepting socket.\n");
+
+        memset(&cli_addr, 0, sizeof(cli_addr));
         new_socket = accept(server->sock, (struct sockaddr*)&cli_addr, &clilen);
         if (new_socket < 0) {
             perror("could not create new socket");
@@ -164,9 +167,6 @@ void * listen_thread(void * user) {
         pthread_mutex_unlock(&server->mutex);
 
         fprintf(stderr, "client connected: %s:%d\n", inet_ntoa(cli_addr.sin_addr), cli_addr.sin_port);
-
-        sem_post(&server->processor_cleanup);
-        sem_post(&proc->server->processor_cleanup);
 
         if(pthread_create(&proc->thread, NULL, processor_thread, proc) != 0) {
             perror("could not create processor thread");
@@ -258,9 +258,6 @@ int http_server_create(http_server_t * server, int portno) {
         perror("could not create http server semaphore");
         goto error;
     }
-
-    // sem_post(&server->processor_cleanup);
-    // sem_wait(&server->processor_cleanup);
 
     semaphore_created = 1;
     if (pthread_create(&server->listen_thread, NULL, listen_thread, (void*)server) != 0) {
