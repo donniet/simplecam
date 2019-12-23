@@ -21,6 +21,15 @@ const char response_header_format[] = "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nCon
 
 const char mime_image_jpeg[] = "image/jpeg";
 const char mime_text_plain[] = "text/plain";
+const char mime_octet_stream[] = "application/octet-stream";
+const char mime_motion_jpeg[] = "video/x-motion-jpeg";
+
+const char route_ping[] = "/ping";
+const char route_config[] = "/config";
+const char route_frame[] = "/frame.jpg";
+const char route_frame_raw[] = "/frame.raw";
+const char route_motion[] = "/motion.bin";
+const char route_video[] = "/video.jpg";
 
 static int parser_message_complete(http_parser * parser) {
     // http_processor_t * p = (http_processor_t*)parser->data;
@@ -40,6 +49,10 @@ int processor_get_url(http_parser * parser, const char * at, size_t length) {
     buf->length = length;
 
     return 0;
+}
+
+int is_route(const char * route, struct __buffer * buf) {
+    return strlen(route) == buf->length && strncmp(route, buf->data, buf->length) == 0;
 }
 
 // maximum requeset size: 4096
@@ -105,9 +118,25 @@ void * processor_thread(void * user) {
 
         goto cleanup;
     }
+    
+    if (is_route(route_ping, &url_buf)) {
+        send_http_response(p->sock, HTTP_STATUS_OK, mime_text_plain, url_buf.data, url_buf.length);
+    } else if (is_route(route_config, &url_buf)) {
+        pthread_mutex_lock(&p->server->mutex);
+        send_http_response(p->sock, HTTP_STATUS_OK, mime_text_plain, p->server->config, p->server->config_size);
+        pthread_mutex_unlock(&p->server->mutex);
+    } else if (is_route(route_frame, &url_buf)) {
+        pthread_mutex_lock(&p->server->mutex);
+        send_http_response(p->sock, HTTP_STATUS_OK, mime_image_jpeg, p->server->frame, p->server->frame_size);
+        pthread_mutex_unlock(&p->server->mutex);
+    } else if (is_route(route_motion, &url_buf)) {
+        pthread_mutex_lock(&p->server->mutex);
+        send_http_response(p->sock, HTTP_STATUS_OK, mime_octet_stream, p->server->motion, p->server->motion_size);
+        pthread_mutex_unlock(&p->server->mutex);
+    } else {
+        send_http_response(p->sock, HTTP_STATUS_NOT_FOUND, mime_text_plain, "not found\n", 10);
+    }
 
-    fprintf(stderr, "size: %d\nmessage: %s\n", sizeof(ok_message), ok_message);
-    send_http_response(p->sock, HTTP_STATUS_OK, mime_text_plain, url_buf.data, url_buf.length);
 
 cleanup:
 
@@ -129,7 +158,7 @@ int send_http_response(int sock, int status, const char * content_type, const ch
 
     char buf[512];
 
-    sprintf(buf, response_header_format 
+    snprintf(buf, sizeof(buf), response_header_format 
         ,status  // status
         ,status_name              // status message
         ,content_type                 // content-type
@@ -143,10 +172,13 @@ int send_http_response(int sock, int status, const char * content_type, const ch
     }
     ret += s;
 
-    s = send(sock, data, length, 0);
-    if(s < 0) {
-        return s;
+    if (data != NULL) {
+        s = send(sock, data, length, 0);
+        if(s < 0) {
+            return s;
+        }
     }
+
     return ret + s;
 }
 
@@ -164,6 +196,7 @@ void * cleanup_thread(void * user) {
         fprintf(stderr, "before cleanup: %d\n", server->processor_count);
 
         for(http_processor_t ** l = &server->processors; *l;) {
+            fprintf(stderr, "in cleanup loop\n");
             http_processor_t * p = *l;
             
             if (p->closed || server->completed) {
@@ -177,6 +210,8 @@ void * cleanup_thread(void * user) {
 
                 free(p);
                 p->server->processor_count--;
+            } else {
+                l = &p->next;
             }
         }
         fprintf(stderr, "after cleanup: %d\n", server->processor_count);

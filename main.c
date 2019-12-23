@@ -93,6 +93,7 @@ static void encoder_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * b
             // motion vectors
             // do nothing for now
             server_write(&state->motion_server, buffer->data, buffer->length);
+            http_server_motion(&state->http_server, buffer->data, buffer->length);
             bytes_written = buffer->length;
         } else {
             // fprintf(stderr, "writing video data\n");
@@ -126,6 +127,9 @@ static void encoder_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * b
     }
 }
 
+#define DEFAULT_VIDEO_PORT 8888
+#define DEFAULT_MOTION_PORT 8889
+#define DEFAULT_HTTP_PORT 8080
 
 int main(int ac, char ** av) {
     MMAL_STATUS_T status = MMAL_SUCCESS;
@@ -143,21 +147,32 @@ int main(int ac, char ** av) {
     bcm_host_init();
     vcos_log_register("simplecam", VCOS_LOG_CATEGORY);
 
-    if (server_create(&state.video_server, 8888) != 0) {
+    if (server_create(&state.video_server, DEFAULT_VIDEO_PORT) != 0) {
         fprintf(stderr, "could not create server\n");
         vcos_log_error("could not create server");
         goto cleanup;
     }
 
-    if (server_create(&state.motion_server, 8889) != 0) {
+    if (server_create(&state.motion_server, DEFAULT_MOTION_PORT) != 0) {
         fprintf(stderr, "could not create motion vector server\n");
         goto cleanup;
     }
 
-    if (http_server_create(&state.http_server, 8080) != 0) {
+    if (http_server_create(&state.http_server, DEFAULT_HTTP_PORT) != 0) {
         fprintf(stderr, "could not create http server\n");
         goto cleanup;
     }
+
+    char config[4096];
+    int config_length = snprintf(config, sizeof(config),
+            "video: \":%d\"\n"
+            "motion: \":%d\"\n"
+            "api: \":%d\"\n",
+            DEFAULT_VIDEO_PORT,
+            DEFAULT_MOTION_PORT,
+            DEFAULT_HTTP_PORT);
+
+    http_server_config(&state.http_server, (uint8_t*)config, config_length);
 
     get_sensor_defaults(state.cameraNum, state.camera_name, &state.width, &state.height);
 
