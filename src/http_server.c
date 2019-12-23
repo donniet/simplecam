@@ -15,16 +15,29 @@
 #include <interface/vcos/vcos_semaphore.h>
 #include <interface/mmal/mmal_logging.h>
 
-const char invalid_request[] = "HTTP/1.1 400 Bad Request\nContent-Length: 0\n\n";
-const char ok_message[] = "HTTP/1.1 200 OK\nContent-Type: text/plain\nContent-Length: 2\n\nok";
+const char invalid_request[] = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
+const char ok_message[] = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nok";
+const char response_header_format[] = "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n";
 
-void parse_request(http_processor_t * p, char * buf, int siz) {
-    // get the first line
-    
-}
+const char mime_image_jpeg[] = "image/jpeg";
+const char mime_text_plain[] = "text/plain";
 
 static int parser_message_complete(http_parser * parser) {
     // http_processor_t * p = (http_processor_t*)parser->data;
+
+    return 0;
+}
+
+struct __buffer {
+    const char * data;
+    size_t length;
+};
+
+int processor_get_url(http_parser * parser, const char * at, size_t length) {
+    struct __buffer * buf = (struct __buffer *)parser->data;
+
+    buf->data = at;
+    buf->length = length;
 
     return 0;
 }
@@ -38,10 +51,16 @@ void * processor_thread(void * user) {
     http_parser parser;
     http_parser_settings parser_settings;
 
+    struct __buffer url_buf = {
+        .data = NULL,
+        .length = 0
+    };
+
     http_parser_init(&parser, HTTP_REQUEST);
-    parser.data = (void*)p;
+    parser.data = (void*)&url_buf;
     http_parser_settings_init(&parser_settings);
     // parser_settings.on_message_complete = parser_message_complete;
+    parser_settings.on_url = processor_get_url;
 
     static const int bufsiz = 4096;
     char buffer[bufsiz];
@@ -66,7 +85,10 @@ void * processor_thread(void * user) {
 
     if ((ps = http_parser_execute(&parser, &parser_settings, buffer, bytes_read)) < bytes_read) {
         fprintf(stderr, "error: parsed bytes %d of %d\n", ps, bytes_read);
-        send(p->sock, invalid_request, sizeof(invalid_request), MSG_NOSIGNAL);
+        const char * msg = "invalid http request";
+        send_http_response(p->sock,
+            HTTP_STATUS_BAD_REQUEST, mime_text_plain,
+            msg, strlen(msg));
         // TODO: send 4XX error
         goto cleanup;
     }
@@ -75,13 +97,17 @@ void * processor_thread(void * user) {
 
     if (parser.method != HTTP_GET) {
         // TODO: send 4XX error
-        send(p->sock, invalid_request, sizeof(invalid_request), MSG_NOSIGNAL);
-        
+        const char * msg = "method not supported";
+        send_http_response(p->sock, 
+            HTTP_STATUS_METHOD_NOT_ALLOWED, 
+            mime_text_plain,
+            msg, strlen(msg));
+
         goto cleanup;
     }
 
     fprintf(stderr, "size: %d\nmessage: %s\n", sizeof(ok_message), ok_message);
-    send(p->sock, ok_message, sizeof(ok_message), MSG_NOSIGNAL);
+    send_http_response(p->sock, HTTP_STATUS_OK, mime_text_plain, url_buf.data, url_buf.length);
 
 cleanup:
 
@@ -95,6 +121,33 @@ cleanup:
     sem_post(&server->processor_cleanup);
 
     return NULL;
+}
+
+int send_http_response(int sock, int status, const char * content_type, const char * data, size_t length) {
+    const char * status_name = http_status_str(status);
+    int ret = 0;
+
+    char buf[512];
+
+    sprintf(buf, response_header_format 
+        ,status  // status
+        ,status_name              // status message
+        ,content_type                 // content-type
+        ,length     // content-length
+    );
+
+    int s = 0;
+    s = send(sock, buf, strlen(buf), 0);
+    if(s < 0) {
+        return s;
+    }
+    ret += s;
+
+    s = send(sock, data, length, 0);
+    if(s < 0) {
+        return s;
+    }
+    return ret + s;
 }
 
 void * cleanup_thread(void * user) {
@@ -209,6 +262,22 @@ int http_server_destroy(http_server_t * server) {
     pthread_mutex_destroy(&server->mutex);
     sem_destroy(&server->processor_cleanup);
 
+    if (server->config != NULL) {
+        free(server->config);
+        server->config = NULL;
+        server->config_size = 0;
+    }
+    if (server->frame != NULL) {
+        free(server->frame);
+        server->frame = NULL;
+        server->frame_size = 0;
+    }
+    if (server->motion != NULL) {
+        free(server->motion);
+        server->motion = NULL;
+        server->motion_size = 0;
+    }
+
     return 0;
 }
 
@@ -248,6 +317,12 @@ int http_server_create(http_server_t * server, int portno) {
     server->processors = NULL;
     server->completed = 0;
     server->processor_count = 0;
+    server->config = NULL;
+    server->config_size = 0;
+    server->frame = NULL;
+    server->frame_size = 0;
+    server->motion = NULL;
+    server->motion_size = 0;
 
     if(pthread_mutex_init(&server->mutex, NULL) != 0) {
         perror("could not create http server mutex");
@@ -294,4 +369,53 @@ error:
     }
 
     return -1;
+}
+
+int http_server_config(http_server_t * server, uint8_t * data, size_t length) {
+    pthread_mutex_lock(&server->mutex);
+
+    if (server->config != NULL) {
+        free(server->config);
+    }
+
+    server->config = (uint8_t*)malloc(length);
+    memcpy(server->config, data, length);
+    server->config_size = length;
+
+    pthread_mutex_unlock(&server->mutex);
+    return 0;
+}
+
+
+int http_server_frame_jpeg(http_server_t * server, uint8_t * data, size_t length) {
+    pthread_mutex_lock(&server->mutex);
+
+    if (server->frame != NULL) {
+        free(server->frame);
+    }
+
+    server->frame = (uint8_t*)malloc(length);
+    memcpy(server->frame, data, length);
+    server->frame_size = length;
+
+    pthread_mutex_unlock(&server->mutex);
+
+    // TODO: trigger a condition variable or semaphore
+    return 0;
+}
+
+
+int http_server_motion(http_server_t * server, uint8_t * data, size_t length) {
+    pthread_mutex_lock(&server->mutex);
+
+    if (server->motion != NULL) {
+        free(server->motion);
+    }
+
+    server->motion = (uint8_t*)malloc(length);
+    memcpy(server->motion, data, length);
+    server->motion_size = length;
+
+    pthread_mutex_unlock(&server->mutex);
+    return 0;
 }

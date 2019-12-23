@@ -31,13 +31,23 @@ typedef struct http_server_tag {
     pthread_mutex_t mutex;
     struct http_processor_tag * processors;
     atomic_int processor_count;
+
+    uint8_t * motion;
+    size_t motion_size;
+
+    uint8_t * frame;
+    size_t frame_size;
+
+    uint8_t * config;
+    size_t config_size;
+
 } http_server_t;
 
 int http_server_create(http_server_t * server, int portno);
 int http_server_destroy(http_server_t * server);
 
-int http_server_frame_jpeg(uint8_t * data, size_t length);
-int http_server_motion(uint8_t * data, size_t length);
-int http_server_config(uint8_t * data, size_t length);
+int http_server_frame_jpeg(http_server_t * server, uint8_t * data, size_t length);
+int http_server_motion(http_server_t * server, uint8_t * data, size_t length);
+int http_server_config(http_server_t * server, uint8_t * data, size_t length);
 
 #endif
