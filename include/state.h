@@ -19,13 +19,21 @@ typedef struct {
     int cameraNum;
     MMAL_COMPONENT_T * camera;
     MMAL_COMPONENT_T * encoder;
+    MMAL_COMPONENT_T * image_encoder;
+    MMAL_COMPONENT_T * splitter;
+    MMAL_CONNECTION_T * splitter_connection;
     MMAL_CONNECTION_T * encoder_connection;
+    MMAL_CONNECTION_T * image_encoder_connection;
     MMAL_POOL_T * encoder_pool;
+    MMAL_POOL_T * image_encoder_pool;
     MMAL_FOURCC_T encoding;
     int profile;
     int level;
     int sensor_mode;
     int abort;
+
+    uint32_t jpeg_restart_interval;
+    uint32_t jpeg_quality;
 
     int iso;
     int video_stabilization;

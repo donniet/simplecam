@@ -55,7 +55,10 @@ void initialize_state(state_t * state) {
     state->camera = NULL;
     state->encoder = NULL;
     state->encoder_pool = NULL;
+    state->image_encoder = NULL;
+    state->image_encoder_pool = NULL;
     state->encoder_connection = NULL;
+    state->image_encoder_connection = NULL;
     state->cameraNum = DEFAULT_CAMERA_NUM;
     state->framerate = DEFAULT_FRAMERATE;
     state->width = DEFAULT_WIDTH;
@@ -69,6 +72,8 @@ void initialize_state(state_t * state) {
     state->metering_mode = DEFAULT_METERING_MODE;
     state->video_stabilization = DEFAULT_VIDEO_STABILIZATION;
     state->flicker_avoid_mode = DEFAULT_FLICKERAVOID_MODE;
+    state->jpeg_quality = 85;
+    state->jpeg_restart_interval = 0;
 
     state->abort = 0;
     // state->video_file = NULL;
@@ -141,8 +146,13 @@ int main(int ac, char ** av) {
     MMAL_PORT_T * camera_preview_port = NULL;
     MMAL_PORT_T * camera_video_port = NULL;
     MMAL_PORT_T * camera_still_port = NULL;
+    MMAL_PORT_T * splitter_input_port = NULL;
+    MMAL_PORT_T * splitter_output_port0 = NULL;
+    MMAL_PORT_T * splitter_output_port1 = NULL;
     MMAL_PORT_T * encoder_input_port = NULL;
     MMAL_PORT_T * encoder_output_port = NULL;
+    MMAL_PORT_T * image_encoder_input = NULL;
+    MMAL_PORT_T * image_encoder_output = NULL;
 
     bcm_host_init();
     vcos_log_register("simplecam", VCOS_LOG_CATEGORY);
@@ -190,21 +200,62 @@ int main(int ac, char ** av) {
         goto cleanup;
     }
 
+    if ((status = mmal_component_create(MMAL_COMPONENT_DEFAULT_SPLITTER, &state.splitter)) != MMAL_SUCCESS) {
+        fprintf(stderr, "could not create splitter component %s\n", mmal_status_to_string(status));
+        goto cleanup;
+    }
+
+    if ((status = create_image_encoder_component(&state)) != MMAL_SUCCESS) {
+        fprintf(stderr, "could not create image encoder component\n");
+        goto cleanup;
+    }
+
+
+
     camera_preview_port = state.camera->output[MMAL_CAMERA_PREVIEW_PORT];
     camera_video_port = state.camera->output[MMAL_CAMERA_VIDEO_PORT];
     camera_still_port = state.camera->output[MMAL_CAMERA_CAPTURE_PORT];
+    splitter_input_port = state.splitter->input[0];
+    splitter_output_port0 = state.splitter->output[0];
+    splitter_output_port1 = state.splitter->output[1];
     encoder_input_port = state.encoder->input[0];
     encoder_output_port = state.encoder->output[0];
+    image_encoder_input = state.image_encoder->input[0];
+    image_encoder_output = state.image_encoder->output[0];
 
-    if ((status = mmal_connection_create(&state.encoder_connection, camera_video_port, encoder_input_port,  
+    if ((status = mmal_connection_create(&state.splitter_connection, camera_video_port, splitter_input_port,
+        MMAL_CONNECTION_FLAG_TUNNELLING | MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT)) != MMAL_SUCCESS)
+    {
+        fprintf(stderr, "error creating camera to splitter component\n");
+        goto cleanup;
+    }
+
+    if ((status = mmal_connection_enable(state.splitter_connection)) != MMAL_SUCCESS) {
+        fprintf(stderr, "could not enable connection\n");
+        goto cleanup;
+    }
+
+    if ((status = mmal_connection_create(&state.encoder_connection, splitter_output_port0, encoder_input_port,  
         MMAL_CONNECTION_FLAG_TUNNELLING | MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT)) != MMAL_SUCCESS) 
     {
-        fprintf(stderr, "error creating camera to encoder connections\n");
+        fprintf(stderr, "error creating splitter to encoder connections\n");
         goto cleanup;
     }
 
     if ((status = mmal_connection_enable(state.encoder_connection)) != MMAL_SUCCESS) {
         fprintf(stderr, "could not enable connection\n");
+        goto cleanup;
+    }
+
+    if ((status = mmal_connection_create(&state.image_encoder_connection, splitter_output_port1, image_encoder_input,
+        MMAL_CONNECTION_FLAG_TUNNELLING | MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT)) != MMAL_SUCCESS) 
+    {
+        fprintf(stderr, "could not create splitter to image_encoder connection\n");
+        goto cleanup;
+    }
+
+    if ((status = mmal_connection_enable(state.image_encoder_connection)) != MMAL_SUCCESS) {
+        fprintf(stderr, "could not enable image_encoder connection\n");
         goto cleanup;
     }
 
@@ -262,6 +313,13 @@ cleanup:
         mmal_connection_destroy(state.encoder_connection);
     }
 
+    if (state.image_encoder_connection != NULL) {
+        if (state.image_encoder_connection->is_enabled) {
+            mmal_connection_disable(state.image_encoder_connection);
+        }
+        mmal_connection_destroy(state.image_encoder_connection);
+    }
+
     if (camera_video_port != NULL && camera_video_port->is_enabled) {
         mmal_port_disable(camera_video_port);
     }
@@ -276,6 +334,12 @@ cleanup:
     }
     if (state.encoder != NULL) {
         mmal_component_destroy(state.encoder);
+    }
+    if (state.image_encoder_pool != NULL) {
+        mmal_port_pool_destroy(state.image_encoder->output[0], state.image_encoder_pool);
+    }
+    if (state.image_encoder != NULL) {
+        mmal_component_destroy(state.image_encoder);
     }
 
     // if (state.video_file != NULL) {

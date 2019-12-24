@@ -343,6 +343,85 @@ error:
     return status;
 }
 
+MMAL_STATUS_T create_image_encoder_component(state_t * state) {
+   MMAL_COMPONENT_T * c = NULL;
+   MMAL_PORT_T * in, * out = NULL;
+   MMAL_STATUS_T status;
+   MMAL_POOL_T *pool;
+
+   status = mmal_component_create(MMAL_COMPONENT_DEFAULT_IMAGE_ENCODER, &c);
+   if (status != MMAL_SUCCESS) {
+      fprintf(stderr, "could not create image encoder: %s\n", mmal_status_to_string(status));
+      goto error;
+   }
+
+   if (!c->input_num || !c->output_num) {
+      status = MMAL_ENOSYS;
+      fprintf(stderr, "JPEG encoder doesn't have any input/output ports\n");
+      goto error;
+   }
+
+   in = c->input[0];
+   out = c->output[0];
+
+   mmal_format_copy(out->format, in->format);
+   out->format->encoding = MMAL_ENCODING_JPEG; // TODO: replace with variable
+   out->buffer_size = out->buffer_num_recommended;
+   if (out->buffer_size < out->buffer_size_min)
+      out->buffer_size = out->buffer_size_min;
+   out->buffer_num = out->buffer_num_recommended;
+   if (out->buffer_num < out->buffer_num_min) 
+      out->buffer_num = out->buffer_num_min;
+
+   mmal_log_dump_format(out->format);
+
+   status = mmal_port_format_commit(out);
+   if (status != MMAL_SUCCESS) {
+      fprintf(stderr, "error setting port format\n");
+      goto error;
+   }
+
+   status = mmal_port_parameter_set_uint32(out, MMAL_PARAMETER_JPEG_RESTART_INTERVAL, state->jpeg_restart_interval);
+   if (status != MMAL_SUCCESS) {
+      fprintf(stderr, "could not set jpeg restart interval\n");
+      goto error;
+   }
+
+   status = mmal_port_parameter_set_uint32(out, MMAL_PARAMETER_JPEG_Q_FACTOR, state->jpeg_quality);
+   if (status != MMAL_SUCCESS) {
+      fprintf(stderr, "could not set jpeg quality\n");
+      goto error;
+   }
+
+   // TODO: investigate thumbnail
+   status = mmal_component_enable(c);
+   if (status != MMAL_SUCCESS) {
+      fprintf(stderr, "could not enable component\n");
+      goto error;
+   }
+
+   pool = mmal_port_pool_create(out, out->buffer_num, out->buffer_size);
+   if (!pool) {
+      fprintf(stderr, "failed to create buffer pool for port %s\n", out->name);
+      goto error;
+   }
+
+   state->image_encoder = c;
+   state->image_encoder_pool = pool;
+
+   return status;
+error:
+   if (c != NULL) {
+      mmal_component_destroy(c);
+      c = NULL;
+   }
+   if (pool != NULL) {
+      mmal_port_pool_destroy(out, pool);
+      pool = NULL;
+   }
+   return status;
+}
+
 MMAL_STATUS_T create_encoder_component(state_t * state) {
     MMAL_COMPONENT_T *encoder = NULL;
     MMAL_PORT_T *encoder_input = NULL, *encoder_output = NULL;
@@ -369,6 +448,12 @@ MMAL_STATUS_T create_encoder_component(state_t * state) {
 
     // We want same format on input and output
     mmal_format_copy(encoder_output->format, encoder_input->format);
+
+   // char fourcc[5];
+   // memcpy(fourcc, &state->encoding, 4);
+   // fourcc[4] = '\0';
+   // fprintf(stderr, "encoding: %s\n", fourcc);
+   // fprintf(stderr, "encoding: %x\n", state->encoding);
 
     // Only supporting H264 at the moment
     encoder_output->format->encoding = state->encoding;
