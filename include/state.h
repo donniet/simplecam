@@ -10,6 +10,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+typedef struct buffer_list_tag {
+    uint8_t * data;
+    size_t length;
+
+    struct buffer_list_tag * next;
+} buffer_list;
+
 typedef struct {
     char camera_name[MMAL_PARAMETER_CAMERA_INFO_MAX_STR_LEN];
     int width;
@@ -26,6 +33,9 @@ typedef struct {
     MMAL_CONNECTION_T * image_encoder_connection;
     MMAL_POOL_T * encoder_pool;
     MMAL_POOL_T * image_encoder_pool;
+    buffer_list * image_buffer_list;
+    buffer_list ** image_buffer_end;
+
     MMAL_FOURCC_T encoding;
     int profile;
     int level;

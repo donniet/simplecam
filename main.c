@@ -74,12 +74,87 @@ void initialize_state(state_t * state) {
     state->flicker_avoid_mode = DEFAULT_FLICKERAVOID_MODE;
     state->jpeg_quality = 85;
     state->jpeg_restart_interval = 0;
+    state->image_buffer_list = NULL;
+    state->image_buffer_end = &state->image_buffer_list;
 
     state->abort = 0;
     // state->video_file = NULL;
 }
 
 
+static void image_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * buffer) {
+    state_t * state = (state_t*)port->userdata;
+
+    if (buffer->length > 0) {
+        mmal_buffer_header_mem_lock(buffer);
+
+        *state->image_buffer_end = (buffer_list*)malloc(sizeof(buffer_list));
+
+        buffer_list * p = *state->image_buffer_end;
+
+        p->data = (uint8_t*)malloc(buffer->length);
+        p->length = buffer->length;
+        p->next = NULL;
+
+        memcpy(p->data, buffer->data, buffer->length);
+        state->image_buffer_end = &p->next;
+
+        mmal_buffer_header_mem_unlock(buffer);
+
+        // Now flag if we have completed
+        if (buffer->flags & (MMAL_BUFFER_HEADER_FLAG_FRAME_END)) {
+            // write the whole buffer list to the http server.
+
+            size_t total_size = 0;
+            for(buffer_list * p = state->image_buffer_list; p; p = p->next) {
+                total_size += p->length;
+            }
+
+            if (total_size > 0) {
+                uint8_t * buf = (uint8_t*)malloc(total_size);
+
+                size_t cur = 0;
+                for(buffer_list * p = state->image_buffer_list; p; p = p->next) {
+                    memcpy(buf + cur, p->data, p->length);
+                    cur += p->length;
+                }
+
+                http_server_frame_jpeg(&state->http_server, buf, total_size);
+
+                // free all the memory
+                for(buffer_list * p = state->image_buffer_list; p;) {
+                    buffer_list * t = p->next;
+
+                    free(p->data);
+                    p->data = NULL;
+                    p->length = 0;
+                    p->next = NULL;
+                    free(p);
+
+                    p = t;
+                }
+            }
+        }
+
+        if (buffer->flags & (MMAL_BUFFER_HEADER_FLAG_FRAME_END | MMAL_BUFFER_HEADER_FLAG_TRANSMISSION_FAILED))
+            fprintf(stderr, "frame ended or something: %x\n", buffer->flags);
+    }
+
+    mmal_buffer_header_release(buffer);
+
+    if (port->is_enabled) {
+        MMAL_STATUS_T status;
+        MMAL_BUFFER_HEADER_T * new_buffer = mmal_queue_get(state->image_encoder_pool->queue);
+
+        if (new_buffer != NULL) {
+            status = mmal_port_send_buffer(port, new_buffer);
+        }
+
+        if (new_buffer == NULL || status != MMAL_SUCCESS) {
+            fprintf(stderr, "could not return the buffer to the encoder pool");
+        }
+    }
+}
 
 
 static void encoder_buffer_callback(MMAL_PORT_T * port, MMAL_BUFFER_HEADER_T * buffer) {
@@ -205,10 +280,10 @@ int main(int ac, char ** av) {
         goto cleanup;
     }
 
-    // if ((status = create_image_encoder_component(&state)) != MMAL_SUCCESS) {
-    //     fprintf(stderr, "could not create image encoder component\n");
-    //     goto cleanup;
-    // }
+    if ((status = create_image_encoder_component(&state)) != MMAL_SUCCESS) {
+        fprintf(stderr, "could not create image encoder component\n");
+        goto cleanup;
+    }
 
 
 
@@ -220,23 +295,22 @@ int main(int ac, char ** av) {
     splitter_output_port1 = state.splitter->output[1];
     encoder_input_port = state.encoder->input[0];
     encoder_output_port = state.encoder->output[0];
-    // image_encoder_input = state.image_encoder->input[0];
-    // image_encoder_output = state.image_encoder->output[0];
+    image_encoder_input = state.image_encoder->input[0];
+    image_encoder_output = state.image_encoder->output[0];
 
 
-    // if ((status = mmal_connection_create(&state.splitter_connection, camera_video_port, splitter_input_port,
-    //     MMAL_CONNECTION_FLAG_TUNNELLING | MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT)) != MMAL_SUCCESS)
-    // {
-    //     fprintf(stderr, "error creating camera to splitter component\n");
-    //     goto cleanup;
-    // }
+    if ((status = mmal_connection_create(&state.splitter_connection, camera_preview_port, splitter_input_port,
+        MMAL_CONNECTION_FLAG_TUNNELLING | MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT)) != MMAL_SUCCESS)
+    {
+        fprintf(stderr, "error creating camera to splitter component\n");
+        goto cleanup;
+    }
 
-    // if ((status = mmal_connection_enable(state.splitter_connection)) != MMAL_SUCCESS) {
-    //     fprintf(stderr, "could not enable connection\n");
-    //     goto cleanup;
-    // }
+    if ((status = mmal_connection_enable(state.splitter_connection)) != MMAL_SUCCESS) {
+        fprintf(stderr, "could not enable connection\n");
+        goto cleanup;
+    }
 
-    // for some reason going through the splitter makes garbage
     if ((status = mmal_connection_create(&state.encoder_connection, camera_video_port, encoder_input_port,  
         MMAL_CONNECTION_FLAG_TUNNELLING | MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT)) != MMAL_SUCCESS) 
     {
@@ -250,27 +324,27 @@ int main(int ac, char ** av) {
     }
 
 
-    // if ((status = mmal_connection_create(&state.image_encoder_connection, splitter_output_port1, image_encoder_input,
-    //     MMAL_CONNECTION_FLAG_TUNNELLING | MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT)) != MMAL_SUCCESS) 
-    // {
-    //     fprintf(stderr, "could not create splitter to image_encoder connection\n");
-    //     goto cleanup;
-    // }
+    if ((status = mmal_connection_create(&state.image_encoder_connection, splitter_output_port1, image_encoder_input,
+        MMAL_CONNECTION_FLAG_TUNNELLING | MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT)) != MMAL_SUCCESS) 
+    {
+        fprintf(stderr, "could not create splitter to image_encoder connection\n");
+        goto cleanup;
+    }
 
-    // if ((status = mmal_connection_enable(state.image_encoder_connection)) != MMAL_SUCCESS) {
-    //     fprintf(stderr, "could not enable image_encoder connection\n");
-    //     goto cleanup;
-    // }
+    if ((status = mmal_connection_enable(state.image_encoder_connection)) != MMAL_SUCCESS) {
+        fprintf(stderr, "could not enable image_encoder connection\n");
+        goto cleanup;
+    }
 
     encoder_output_port->userdata = (struct MMAL_PORT_USERDATA_T*)&state;
+    image_encoder_output->userdata = (struct MMAL_PORT_USERDATA_T*)&state;
 
     if ((status = mmal_port_enable(encoder_output_port, encoder_buffer_callback)) != MMAL_SUCCESS) {
         fprintf(stderr, "error enabling encoder output port\n");
         goto cleanup;
     }
 
-    int num = mmal_queue_length(state.encoder_pool->queue);
-    for(; num > 0; num--) {
+    for(int num = mmal_queue_length(state.encoder_pool->queue); num > 0; num--) {
         MMAL_BUFFER_HEADER_T * buffer = mmal_queue_get(state.encoder_pool->queue);
 
         if (!buffer) {
@@ -279,6 +353,26 @@ int main(int ac, char ** av) {
         }
 
         if(mmal_port_send_buffer(encoder_output_port, buffer) != MMAL_SUCCESS) {
+            fprintf(stderr, "unable to send buffer to encoder output port\n");
+            continue;
+        }
+        fprintf(stderr, "enabled buffer %d\n", num);
+    }
+
+    if ((status = mmal_port_enable(image_encoder_output, image_buffer_callback)) != MMAL_SUCCESS) {
+        fprintf(stderr, "error enabling image encoder output port\n");
+        goto cleanup;
+    }
+     
+    for(int num = mmal_queue_length(state.image_encoder_pool->queue); num > 0; num--) {
+        MMAL_BUFFER_HEADER_T * buffer = mmal_queue_get(state.image_encoder_pool->queue);
+
+        if (!buffer) {
+            fprintf(stderr, "unable to get a required buffer %d from the pool\n", num);
+            continue;
+        }
+
+        if(mmal_port_send_buffer(image_encoder_output, buffer) != MMAL_SUCCESS) {
             fprintf(stderr, "unable to send buffer to encoder output port\n");
             continue;
         }
